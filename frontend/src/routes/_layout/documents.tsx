@@ -2,7 +2,7 @@
 
 import { createFileRoute } from "@tanstack/react-router"
 
-import { Download, Upload, X } from "lucide-react"
+import { PencilSparkles, Upload, X } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
 
@@ -23,7 +23,7 @@ export const Route = createFileRoute("/_layout/documents")({
   head: () => ({
     meta: [
       {
-        title: "Documents - FastAPI Template",
+        title: "Documents - SnapFill",
       },
     ],
   }),
@@ -40,6 +40,7 @@ export function Dropzone() {
 
   return (
     <FileUpload
+      accept=".pdf"
       maxFiles={2}
       maxSize={5 * 1024 * 1024}
       className="w-full max-w-md"
@@ -54,8 +55,9 @@ export function Dropzone() {
             <Upload className="size-6 text-muted-foreground" />
           </div>
           <p className="text-sm font-medium">Drag & drop files here</p>
+          <p className="text-xs text-muted-foreground">Or click to browse</p>
           <p className="text-xs text-muted-foreground">
-            Or click to browse (max 2 files, up to 5MB each)
+            PDF only · Max 2 files · Up to 5MB each
           </p>
         </div>
         <FileUploadTrigger asChild>
@@ -92,7 +94,7 @@ function Documents() {
           </p>
         </div>
         <Button className="my-4">
-          <Download className="mr-2" />
+          <PencilSparkles className="mr-2" />
           Fill All
         </Button>
       </div>
