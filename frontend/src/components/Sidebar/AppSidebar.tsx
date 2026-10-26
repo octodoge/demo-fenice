@@ -1,4 +1,22 @@
-import { Briefcase, Home, Users } from "lucide-react"
+/* AIGEN MOD START */
+
+// import { Briefcase, Home, Users } from "lucide-react"
+
+// import { SidebarAppearance } from "@/components/Common/Appearance"
+// import { Logo } from "@/components/Common/Logo"
+// import {
+//   Sidebar,
+//   SidebarContent,
+//   SidebarFooter,
+//   SidebarHeader,
+// } from "@/components/ui/sidebar"
+// import useAuth from "@/hooks/useAuth"
+// import { type Item, Main } from "./Main"
+// import { User } from "./User"
+
+/* AIGEN MOD CONT */
+
+import { Briefcase, FileText, Home, Users } from "lucide-react"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -12,9 +30,14 @@ import useAuth from "@/hooks/useAuth"
 import { type Item, Main } from "./Main"
 import { User } from "./User"
 
+/* AIGEN MOD END */
+
 const baseItems: Item[] = [
   { icon: Home, title: "Dashboard", path: "/" },
   { icon: Briefcase, title: "Items", path: "/items" },
+  /* AIGEN ADD START */
+  { icon: FileText, title: "Documents", path: "/documents" },
+  /* AIGEN ADD END */
 ]
 
 export function AppSidebar() {
