@@ -29,13 +29,15 @@ export const Route = createFileRoute("/_layout/documents")({
   }),
 })
 
+type DocumentStatus = "processing" | "success" | "error"
+
 interface DropzoneProps {
   files: File[]
   setFiles: (files: File[]) => void
-  isProcessing?: boolean
+  statuses: Map<File, DocumentStatus>
 }
 
-export function Dropzone({ files, setFiles, isProcessing }: DropzoneProps) {
+export function Dropzone({ files, setFiles, statuses }: DropzoneProps) {
   const onFileReject = React.useCallback((file: File, message: string) => {
     toast(message, {
       description: `"${file.name.length > 20 ? `${file.name.slice(0, 20)}...` : file.name}" has been rejected`,
@@ -52,7 +54,7 @@ export function Dropzone({ files, setFiles, isProcessing }: DropzoneProps) {
       onValueChange={setFiles}
       onFileReject={onFileReject}
       multiple
-      disabled={isProcessing}
+      disabled={statuses.size > 0}
     >
       <FileUploadDropzone>
         <div className="flex flex-col items-center gap-1 text-center">
@@ -76,7 +78,7 @@ export function Dropzone({ files, setFiles, isProcessing }: DropzoneProps) {
           <FileUploadItem key={index} value={file}>
             <FileUploadItemPreview />
             <FileUploadItemMetadata />
-            {isProcessing ? (
+            {statuses.size > 0 ? (
               <div className="size-7" />
             ) : (
               <FileUploadItemDelete asChild>
@@ -94,15 +96,29 @@ export function Dropzone({ files, setFiles, isProcessing }: DropzoneProps) {
 
 function Documents() {
   const [files, setFiles] = React.useState<File[]>([])
-  const [isProcessing, setIsProcessing] = React.useState(false)
+  const [statuses, setStatuses] = React.useState<Map<File, DocumentStatus>>(
+    () => new Map(),
+  )
+
+  const handleFillAll = () => {
+    // TODO: review
+    setStatuses((prev) => {
+      const next = new Map(prev)
+      for (const file of files) {
+        next.set(file, "processing")
+      }
+      return next
+    })
+  }
 
   useBlocker({
     shouldBlockFn: () => {
-      if (!isProcessing) return false
-      return !window.confirm(
-        // TODO use native?
-        "Documents are currently being processed. If you leave now, progress will be lost. Are you sure you want to leave?",
-      )
+      if (statuses.size > 0)
+        return !window.confirm(
+          // TODO use native?
+          "Documents are currently being processed. If you leave now, progress will be lost. Are you sure you want to leave?",
+        )
+      return false
     },
   })
 
@@ -117,11 +133,11 @@ function Documents() {
         </div>
         <Button // TODO review
           className="my-4"
-          variant={isProcessing ? "secondary" : "default"}
-          disabled={files.length === 0 || isProcessing}
-          onClick={() => setIsProcessing(!isProcessing)}
+          variant={statuses.size > 0 ? "secondary" : "default"}
+          disabled={files.length === 0 || statuses.size > 0}
+          onClick={handleFillAll}
         >
-          {isProcessing ? (
+          {statuses.size > 0 ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Processing...
@@ -134,7 +150,7 @@ function Documents() {
           )}
         </Button>
       </div>
-      <Dropzone files={files} setFiles={setFiles} isProcessing={isProcessing} />
+      <Dropzone files={files} setFiles={setFiles} statuses={statuses} />
     </div>
   )
 }
