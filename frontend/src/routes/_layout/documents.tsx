@@ -1,8 +1,8 @@
 /* AIGEN ADD START */
 
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useBlocker } from "@tanstack/react-router"
 
-import { PencilSparkles, Upload, X } from "lucide-react"
+import { Loader2, PencilSparkles, Upload, X } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
 
@@ -29,9 +29,13 @@ export const Route = createFileRoute("/_layout/documents")({
   }),
 })
 
-export function Dropzone() {
-  const [files, setFiles] = React.useState<File[]>([])
+interface DropzoneProps {
+  files: File[]
+  setFiles: (files: File[]) => void
+  isProcessing?: boolean
+}
 
+export function Dropzone({ files, setFiles, isProcessing }: DropzoneProps) {
   const onFileReject = React.useCallback((file: File, message: string) => {
     toast(message, {
       description: `"${file.name.length > 20 ? `${file.name.slice(0, 20)}...` : file.name}" has been rejected`,
@@ -48,6 +52,7 @@ export function Dropzone() {
       onValueChange={setFiles}
       onFileReject={onFileReject}
       multiple
+      disabled={isProcessing}
     >
       <FileUploadDropzone>
         <div className="flex flex-col items-center gap-1 text-center">
@@ -71,11 +76,15 @@ export function Dropzone() {
           <FileUploadItem key={index} value={file}>
             <FileUploadItemPreview />
             <FileUploadItemMetadata />
-            <FileUploadItemDelete asChild>
-              <Button variant="ghost" size="icon" className="size-7">
-                <X />
-              </Button>
-            </FileUploadItemDelete>
+            {isProcessing ? (
+              <div className="size-7" />
+            ) : (
+              <FileUploadItemDelete asChild>
+                <Button variant="ghost" size="icon" className="size-7">
+                  <X />
+                </Button>
+              </FileUploadItemDelete>
+            )}
           </FileUploadItem>
         ))}
       </FileUploadList>
@@ -84,6 +93,19 @@ export function Dropzone() {
 }
 
 function Documents() {
+  const [files, setFiles] = React.useState<File[]>([])
+  const [isProcessing, setIsProcessing] = React.useState(false)
+
+  useBlocker({
+    shouldBlockFn: () => {
+      if (!isProcessing) return false
+      return !window.confirm(
+        // TODO use native?
+        "Documents are currently being processed. If you leave now, progress will be lost. Are you sure you want to leave?",
+      )
+    },
+  })
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -93,12 +115,26 @@ function Documents() {
             Upload your documents and automatically fill them
           </p>
         </div>
-        <Button className="my-4">
-          <PencilSparkles className="mr-2" />
-          Fill All
+        <Button // TODO review
+          className="my-4"
+          variant={isProcessing ? "secondary" : "default"}
+          disabled={files.length === 0 || isProcessing}
+          onClick={() => setIsProcessing(!isProcessing)}
+        >
+          {isProcessing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Processing...
+            </>
+          ) : (
+            <>
+              <PencilSparkles className="mr-2 h-4 w-4" />
+              Fill All ({files.length})
+            </>
+          )}
         </Button>
       </div>
-      <Dropzone />
+      <Dropzone files={files} setFiles={setFiles} isProcessing={isProcessing} />
     </div>
   )
 }
