@@ -4,7 +4,15 @@
 
 import { createFileRoute, useBlocker } from "@tanstack/react-router"
 
-import { Download, LoaderCircle, PencilSparkles, Upload, X } from "lucide-react"
+import {
+  CircleCheck,
+  CircleX,
+  Download,
+  LoaderCircle,
+  PencilSparkles,
+  Upload,
+  X,
+} from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
 
@@ -51,7 +59,7 @@ export function Dropzone({ files, setFiles, statuses }: DropzoneProps) {
       accept=".pdf"
       maxFiles={2}
       maxSize={5 * 1024 * 1024}
-      className="w-full max-w-md"
+      className="w-full max-w-md mx-auto"
       value={files}
       onValueChange={setFiles}
       onFileReject={onFileReject}
@@ -76,21 +84,35 @@ export function Dropzone({ files, setFiles, statuses }: DropzoneProps) {
         </FileUploadTrigger>
       </FileUploadDropzone>
       <FileUploadList>
-        {files.map((file, index) => (
-          <FileUploadItem key={index} value={file}>
-            <FileUploadItemPreview />
-            <FileUploadItemMetadata />
-            {statuses.size > 0 ? (
-              <div className="size-7" />
-            ) : (
-              <FileUploadItemDelete asChild>
-                <Button variant="ghost" size="icon" className="size-7">
-                  <X />
-                </Button>
-              </FileUploadItemDelete>
-            )}
-          </FileUploadItem>
-        ))}
+        {files.map((file, index) => {
+          const status = statuses.get(file)
+
+          return (
+            <FileUploadItem key={index} value={file}>
+              <FileUploadItemPreview />
+              <FileUploadItemMetadata />
+              {status === "processing" ? (
+                <div className="flex size-7 items-center justify-center">
+                  <LoaderCircle className="animate-spin text-muted-foreground" />
+                </div>
+              ) : status === "success" ? (
+                <div className="flex size-7 items-center justify-center">
+                  <CircleCheck className="text-emerald-500" />
+                </div>
+              ) : status === "error" ? (
+                <div className="flex size-7 items-center justify-center">
+                  <CircleX className="text-destructive" />
+                </div>
+              ) : (
+                <FileUploadItemDelete asChild>
+                  <Button variant="ghost" size="icon" className="size-7">
+                    <X />
+                  </Button>
+                </FileUploadItemDelete>
+              )}
+            </FileUploadItem>
+          )
+        })}
       </FileUploadList>
     </FileUpload>
   )
@@ -111,6 +133,13 @@ function Documents() {
   const handleFillAll = () => {
     setStatuses(new Map(files.map((file) => [file, "processing"])))
     // TODO: implement fill logic
+    setTimeout(() => {
+      setStatuses(
+        new Map(
+          files.map((file, index) => [file, index === 0 ? "success" : "error"]),
+        ),
+      )
+    }, 2000)
   }
 
   const handleDownloadAll = () => {
