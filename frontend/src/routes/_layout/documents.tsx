@@ -1,3 +1,5 @@
+/* AIGEN REFS
+// Drag and drop component: https://diceui.com/docs/components/radix/file-upload
 /* AIGEN ADD START */
 
 import { createFileRoute, useBlocker } from "@tanstack/react-router"
@@ -101,21 +103,13 @@ function Documents() {
   )
 
   const handleFillAll = () => {
-    // TODO: review
-    setStatuses((prev) => {
-      const next = new Map(prev)
-      for (const file of files) {
-        next.set(file, "processing")
-      }
-      return next
-    })
+    setStatuses(new Map(files.map((file) => [file, "processing"])))
   }
 
   useBlocker({
     shouldBlockFn: () => {
       if (statuses.size > 0)
         return !window.confirm(
-          // TODO use native?
           "Documents are currently being processed. If you leave now, progress will be lost. Are you sure you want to leave?",
         )
       return false
