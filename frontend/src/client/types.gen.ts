@@ -5,6 +5,16 @@ export type ClientOptions = {
 };
 
 /**
+ * Body_documents-upload_document
+ */
+export type Body_documents_upload_document = {
+    /**
+     * File
+     */
+    file: Blob | File;
+};
+
+/**
  * Body_login-login_access_token
  */
 export type Body_login_login_access_token = {
@@ -920,6 +930,31 @@ export type itemsUpdateItemResponses = {
 };
 
 export type itemsUpdateItemResponse = itemsUpdateItemResponses[keyof itemsUpdateItemResponses];
+
+export type documentsUploadDocumentData = {
+    body: Body_documents_upload_document;
+    path?: never;
+    query?: never;
+    url: '/api/v1/documents/';
+};
+
+export type documentsUploadDocumentErrors = {
+    /**
+     * Validation Error
+     */
+    422: HTTPValidationError;
+};
+
+export type documentsUploadDocumentError = documentsUploadDocumentErrors[keyof documentsUploadDocumentErrors];
+
+export type documentsUploadDocumentResponses = {
+    /**
+     * Successful Response
+     */
+    200: Blob | File;
+};
+
+export type documentsUploadDocumentResponse = documentsUploadDocumentResponses[keyof documentsUploadDocumentResponses];
 
 export type privateCreateUserData = {
     body: PrivateUserCreate;

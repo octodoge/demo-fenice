@@ -2,8 +2,9 @@
 // Drag and drop component: https://diceui.com/docs/components/radix/file-upload
 /* AIGEN ADD START */
 
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute, useBlocker } from "@tanstack/react-router"
-
+import { downloadZip } from "client-zip"
 import {
   CircleCheck,
   CircleX,
@@ -16,6 +17,7 @@ import {
 import * as React from "react"
 import { toast } from "sonner"
 
+import { DocumentsService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   FileUpload,
@@ -27,6 +29,8 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload"
+import useCustomToast from "@/hooks/useCustomToast"
+import { handleError } from "@/utils"
 
 export const Route = createFileRoute("/_layout/documents")({
   component: Documents,
@@ -119,8 +123,12 @@ export function Dropzone({ files, setFiles, statuses }: DropzoneProps) {
 }
 
 function Documents() {
+  const { showErrorToast } = useCustomToast()
   const [files, setFiles] = React.useState<File[]>([])
   const [statuses, setStatuses] = React.useState<Map<File, DocumentStatus>>(
+    () => new Map(),
+  )
+  const [downloadBlobs, setDownloadBlobs] = React.useState<Map<File, Blob>>(
     () => new Map(),
   )
 
@@ -130,20 +138,63 @@ function Documents() {
     (s) => s === "success",
   ).length
 
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      try {
+        return await DocumentsService.uploadDocument({ body: { file } })
+      } catch (err: any) {
+        if (err.response?.data instanceof Blob) {
+          err.response.data = JSON.parse(await err.response.data.text())
+        }
+        throw err
+      }
+    },
+    onSuccess: (res, file) => {
+      setStatuses((prev) => new Map(prev).set(file, "success"))
+      setDownloadBlobs((prev) => new Map(prev).set(file, res.data as Blob))
+    },
+    onError: (error, file) => {
+      setStatuses((prev) => new Map(prev).set(file, "error"))
+      handleError.call(showErrorToast, error)
+    },
+  })
+
   const handleFillAll = () => {
+    // TODO: review
     setStatuses(new Map(files.map((file) => [file, "processing"])))
-    // TODO: implement fill logic
-    setTimeout(() => {
-      setStatuses(
-        new Map(
-          files.map((file, index) => [file, index === 0 ? "success" : "error"]),
-        ),
-      )
-    }, 2000)
+    setDownloadBlobs(new Map())
+    for (const file of files) {
+      uploadMutation.mutate(file)
+    }
   }
 
-  const handleDownloadAll = () => {
-    // TODO: implement download logic
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadAll = async () => {
+    // TODO: review
+    if (downloadBlobs.size === 1) {
+      const [file, blob] = downloadBlobs.entries().next().value!
+      triggerBlobDownload(blob, file.name)
+      return
+    }
+
+    if (downloadBlobs.size > 1) {
+      const filesToZip = Array.from(downloadBlobs.entries()).map(
+        ([file, blob]) => ({
+          name: file.name,
+          input: blob,
+        }),
+      )
+      const zipBlob = await downloadZip(filesToZip).blob()
+      triggerBlobDownload(zipBlob, "documents.zip")
+    }
   }
 
   useBlocker({
