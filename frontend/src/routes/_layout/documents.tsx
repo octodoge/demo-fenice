@@ -4,7 +4,7 @@
 
 import { createFileRoute, useBlocker } from "@tanstack/react-router"
 
-import { Loader2, PencilSparkles, Upload, X } from "lucide-react"
+import { Download, LoaderCircle, PencilSparkles, Upload, X } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
 
@@ -102,15 +102,26 @@ function Documents() {
     () => new Map(),
   )
 
+  const isProcessing = [...statuses.values()].includes("processing")
+  const isFinished = statuses.size > 0 && !isProcessing
+  const successCount = [...statuses.values()].filter(
+    (s) => s === "success",
+  ).length
+
   const handleFillAll = () => {
     setStatuses(new Map(files.map((file) => [file, "processing"])))
+    // TODO: implement fill logic
+  }
+
+  const handleDownloadAll = () => {
+    // TODO: implement download logic
   }
 
   useBlocker({
     shouldBlockFn: () => {
       if (statuses.size > 0)
         return !window.confirm(
-          "Documents are currently being processed. If you leave now, progress will be lost. Are you sure you want to leave?",
+          "Make sure you downloaded your filled documents. Leaving now will reset all progress. Are you sure you want to leave?",
         )
       return false
     },
@@ -125,24 +136,30 @@ function Documents() {
             Upload your documents and automatically fill them
           </p>
         </div>
-        <Button // TODO review
-          className="my-4"
-          variant={statuses.size > 0 ? "secondary" : "default"}
-          disabled={files.length === 0 || statuses.size > 0}
-          onClick={handleFillAll}
-        >
-          {statuses.size > 0 ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            <>
-              <PencilSparkles className="mr-2 h-4 w-4" />
-              Fill All ({files.length})
-            </>
-          )}
-        </Button>
+        {isProcessing ? (
+          <Button className="my-4" disabled>
+            <LoaderCircle className="mr-2 animate-spin" />
+            Processing...
+          </Button>
+        ) : isFinished ? (
+          <Button
+            className="my-4"
+            disabled={successCount === 0}
+            onClick={handleDownloadAll}
+          >
+            <Download className="mr-2" />
+            Download All ({successCount})
+          </Button>
+        ) : (
+          <Button
+            className="my-4"
+            disabled={files.length === 0}
+            onClick={handleFillAll}
+          >
+            <PencilSparkles className="mr-2" />
+            Fill All ({files.length})
+          </Button>
+        )}
       </div>
       <Dropzone files={files} setFiles={setFiles} statuses={statuses} />
     </div>
