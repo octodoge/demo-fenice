@@ -160,7 +160,6 @@ function Documents() {
   })
 
   const handleFillAll = () => {
-    // TODO: review
     setStatuses(new Map(files.map((file) => [file, "processing"])))
     setDownloadBlobs(new Map())
     for (const file of files) {
@@ -174,11 +173,10 @@ function Documents() {
     a.href = url
     a.download = filename
     a.click()
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   const handleDownloadAll = async () => {
-    // TODO: review
     if (downloadBlobs.size === 1) {
       const [file, blob] = downloadBlobs.entries().next().value!
       triggerBlobDownload(blob, file.name)
@@ -193,7 +191,7 @@ function Documents() {
         }),
       )
       const zipBlob = await downloadZip(filesToZip).blob()
-      triggerBlobDownload(zipBlob, "documents.zip")
+      triggerBlobDownload(zipBlob, "filled_documents.zip")
     }
   }
 
