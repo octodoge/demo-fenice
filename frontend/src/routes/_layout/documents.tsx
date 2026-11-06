@@ -178,8 +178,11 @@ function Documents() {
 
   const handleDownloadAll = async () => {
     if (downloadBlobs.size === 1) {
-      const [file, blob] = downloadBlobs.entries().next().value!
-      triggerBlobDownload(blob, file.name)
+      const [_file, blob] = downloadBlobs.entries().next().value!
+      // triggerBlobDownload(blob, file.name) // TODO: uncomment this and remove below after debugging
+      const url = URL.createObjectURL(blob)
+      window.open(url, "_blank")
+
       return
     }
 

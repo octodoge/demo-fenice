@@ -4,8 +4,11 @@
 
 from urllib.parse import quote
 
+import pymupdf
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import Response
+
+from app.utils import highlight_forms
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -24,6 +27,9 @@ async def upload_document(file: UploadFile) -> PDFResponse:
     content = await file.read()
     if not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=422, detail="Invalid PDF content")
+
+    doc = pymupdf.open(stream=content, filetype="pdf")
+    content = highlight_forms(doc)
 
     return PDFResponse(headers=headers, content=content)
 

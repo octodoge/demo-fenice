@@ -1,3 +1,21 @@
+# AIGEN MOD START
+
+# import logging
+# from dataclasses import dataclass
+# from datetime import UTC, datetime, timedelta
+# from pathlib import Path
+# from typing import Any
+
+# import emails
+# import jwt
+# from jinja2 import Template
+# from jwt.exceptions import InvalidTokenError
+
+# from app.core import security
+# from app.core.config import settings
+
+# AIGEN MOD CONT
+
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -6,11 +24,14 @@ from typing import Any
 
 import emails
 import jwt
+import pymupdf
 from jinja2 import Template
 from jwt.exceptions import InvalidTokenError
 
 from app.core import security
 from app.core.config import settings
+
+# AIGEN MOD END
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -123,3 +144,19 @@ def verify_password_reset_token(token: str) -> str | None:
         return str(decoded_token["sub"])
     except InvalidTokenError:
         return None
+
+
+# AIGEN ADD START
+
+
+def highlight_forms(file: pymupdf.Document) -> bytes:
+    with file:
+        for page in file.pages():
+            for widget in page.widgets():
+                if widget.rect and not widget.rect.is_empty:
+                    widget.border_color = (1, 0, 0)
+                    widget.update()
+        return file.tobytes()
+
+
+# AIGEN ADD END
