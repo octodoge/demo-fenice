@@ -6,3 +6,6 @@ backend/app/frontend/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+# AIGEN ADD START
+.env.local
+# AIGEN ADD END
