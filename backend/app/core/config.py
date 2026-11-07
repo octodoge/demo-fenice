@@ -15,7 +15,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Use top level .env file (one level above ./backend/)
-        env_file="../.env",
+        # AIGEN MOD START
+        # env_file="../.env",
+        # AIGEN MOD CONT
+        env_file=("../.env", "../.env.local"),
+        # AIGEN MOD END
         env_ignore_empty=True,
         extra="ignore",
     )
@@ -64,6 +68,10 @@ class Settings(BaseSettings):
     EMAIL_TEST_USER: EmailStr = "test@example.com"
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
+
+    # AIGEN ADD START
+    AI_STUDIO_API_KEY: str | None = None
+    # AIGEN ADD END
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

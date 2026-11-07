@@ -19,14 +19,19 @@
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from inspect import cleandoc
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import emails
 import jwt
 import pymupdf
 from jinja2 import Template
 from jwt.exceptions import InvalidTokenError
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent, BinaryContent
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.providers.google import GoogleProvider
 
 from app.core import security
 from app.core.config import settings
@@ -149,14 +154,68 @@ def verify_password_reset_token(token: str) -> str | None:
 # AIGEN ADD START
 
 
-def highlight_forms(file: pymupdf.Document) -> bytes:
-    with file:
-        for page in file.pages():
-            for widget in page.widgets():
-                if widget.rect and not widget.rect.is_empty:
-                    widget.border_color = (1, 0, 0)
-                    widget.update()
-        return file.tobytes()
+def highlight_widgets(doc: pymupdf.Document) -> None:
+    for page in doc.pages():
+        for widget in page.widgets():
+            if widget.rect and not widget.rect.is_empty:
+                widget.border_color = (1, 0, 0)
+                widget.update()
+
+
+# TODO: parse from .env.local
+ai_studio_api_key = settings.AI_STUDIO_API_KEY or "invalid-api-key"
+
+
+class MissingWidget(BaseModel):
+    page: int = Field(description="The page where the widget should be placed.")
+    box_2d: list[int] = Field(
+        description="The 2D bounding box where to place the widget on the page, as [ymin, xmin, ymax, xmax] normalized to 0-1000."
+    )
+    type: Literal["text", "checkbox", "signature"] = Field(
+        description="The type of widget to place."
+    )
+
+
+widget_detector = Agent(
+    GoogleModel(
+        "gemini-3.8-flash",
+        provider=GoogleProvider(api_key=ai_studio_api_key),
+    ),
+    model_settings=GoogleModelSettings(thinking="medium"),
+    output_type=list[MissingWidget],
+    instructions=cleandoc(
+        """
+        You will receive images corresponding to pages of a PDF form.
+        Pre-existing interactive form fields (widgets) are highlighted with red borders.
+        If an area expects user input (e.g. an empty space or underline for text or signatures, a checkbox, etc.) but lacks a red border, a widget is missing.
+        Often all widgets are missing, so you might not see any red borders at all.
+        Detect all missing widgets of type "text", "checkbox", and "signature".
+        Ignore widgets of other types.
+        """
+    ),
+)
+
+
+async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
+    if len(doc) == 0:
+        return []
+
+    prompt_parts: list[str | BinaryContent] = []
+    for page_idx, page in enumerate(doc.pages()):
+        prompt_parts.append(f"--- Page {page_idx} ---")
+        pix = page.get_pixmap(dpi=150)
+        prompt_parts.append(
+            BinaryContent(data=pix.tobytes("png"), media_type="image/png")
+        )
+
+    result = await widget_detector.run(prompt_parts)
+    return result.output
+
+
+def add_missing_widgets(
+    doc: pymupdf.Document, missing_widgets: list[MissingWidget]
+) -> None:
+    pass  # TODO: implement
 
 
 # AIGEN ADD END
