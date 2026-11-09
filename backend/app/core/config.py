@@ -71,6 +71,7 @@ class Settings(BaseSettings):
 
     # AIGEN ADD START
     AI_STUDIO_API_KEY: str | None = None
+    LOGFIRE_TOKEN: str | None = None
     # AIGEN ADD END
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:

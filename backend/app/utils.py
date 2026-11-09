@@ -28,7 +28,7 @@ import jwt
 import pymupdf
 from jinja2 import Template
 from jwt.exceptions import InvalidTokenError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
@@ -154,6 +154,11 @@ def verify_password_reset_token(token: str) -> str | None:
 # AIGEN ADD START
 
 
+# TODO: implement
+def clean_malformed_widgets(doc: pymupdf.Document) -> None:
+    pass
+
+
 def highlight_widgets(doc: pymupdf.Document) -> None:
     for page in doc.pages():
         for widget in page.widgets():
@@ -162,18 +167,41 @@ def highlight_widgets(doc: pymupdf.Document) -> None:
                 widget.update()
 
 
-# TODO: parse from .env.local
 ai_studio_api_key = settings.AI_STUDIO_API_KEY or "invalid-api-key"
 
 
 class MissingWidget(BaseModel):
-    page: int = Field(description="The page where the widget should be placed.")
+    page: int = Field(description="The page where the widget is missing.")
     box_2d: list[int] = Field(
-        description="The 2D bounding box where to place the widget on the page, as [ymin, xmin, ymax, xmax] normalized to 0-1000."
+        description=(
+            "The 2D bounding box of the missing widget on the page as "
+            "[ymin, xmin, ymax, xmax] normalized to 0-1000."
+        ),
     )
     type: Literal["text", "checkbox", "signature"] = Field(
-        description="The type of widget to place."
+        description="The type of the missing widget."
     )
+
+    @field_validator("page")
+    @classmethod
+    def validate_page(cls, page: int, info: ValidationInfo) -> int:
+        assert isinstance(info.context, DetectorDeps)
+        if not 0 <= page < len(info.context.doc):
+            raise ValueError("invalid page")
+        return page
+
+    @field_validator("box_2d")
+    @classmethod
+    def validate_box_2d(cls, box_2d: list[int]) -> list[int]:
+        ymin, xmin, ymax, xmax = box_2d
+        if not (0 <= ymin < ymax <= 1000 and 0 <= xmin < xmax <= 1000):
+            raise ValueError("invalid bounding box")
+        return box_2d
+
+
+@dataclass
+class DetectorDeps:
+    doc: pymupdf.Document
 
 
 widget_detector = Agent(
@@ -183,19 +211,34 @@ widget_detector = Agent(
     ),
     model_settings=GoogleModelSettings(thinking="medium"),
     output_type=list[MissingWidget],
+    deps_type=DetectorDeps,
+    validation_context=lambda ctx: ctx.deps,
     instructions=cleandoc(
         """
         You will receive images corresponding to pages of a PDF form.
-        Pre-existing interactive form fields (widgets) are highlighted with red borders.
-        If an area expects user input (e.g. an empty space or underline for text or signatures, a checkbox, etc.) but lacks a red border, a widget is missing.
-        Often all widgets are missing, so you might not see any red borders at all.
-        Detect all missing widgets of type "text", "checkbox", and "signature".
-        Ignore widgets of other types.
+        Each image is preceded by its page index (ignore page numbers on the image).
+        Interactive form fields (widgets) are highlighted with red borders.
+        Areas expecting inputs (e.g. empty boxes, blank areas above underlines,
+        checkboxes, etc.) not showing red borders are missing a widget (they are not
+        interactive).
+        Often, all widgets are missing, so no red borders are present at all.
+        Detect all missing widgets of type "text", "checkbox" and "signature", if any
+        (ignore other types).
+        This includes specifying for each missing widget a 2D box that would bound it if
+        inserted.
+        Each image has its own independent box coordinate system (with y=0 at the top),
+        so never use cumulative coordinates across images.
+        For "text" widgets, ensure that:
+        * The bottom of the box rests along the underline or the text baseline.
+        * The box starts strictly after any label or colon, never overlapping text.
+        * The box spans the full input area.
         """
     ),
 )
 
 
+# TODO: in final product would be better to process all pages in parallel (slightly
+# higher cost but faster and less error prone for the model)
 async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
     if len(doc) == 0:
         return []
@@ -208,14 +251,82 @@ async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
             BinaryContent(data=pix.tobytes("png"), media_type="image/png")
         )
 
-    result = await widget_detector.run(prompt_parts)
+    result = await widget_detector.run(prompt_parts, deps=DetectorDeps(doc=doc))
     return result.output
 
 
+def postprocess_missing_widgets(widgets: list[MissingWidget]) -> None:
+    a4_ratio: float = 297 / 210
+
+    text_height: int = 16
+    left_padding: int = 4
+    min_text_width: int = round(text_height * a4_ratio)
+    checkbox_half_h: int = 12 // 2
+    checkbox_half_w: int = round(checkbox_half_h * a4_ratio)
+    signature_half_h: int = 32 // 2
+    signature_half_w: int = round(signature_half_h * 2 * a4_ratio)
+
+    for widget in widgets:
+        ymin, xmin, ymax, xmax = widget.box_2d
+        y_center: int = (ymin + ymax) // 2
+        x_center: int = (xmin + xmax) // 2
+
+        if widget.type == "text":
+            ymax = max(text_height, ymax)
+            ymin = ymax - text_height
+            xmin = min(xmin + left_padding, 1000 - min_text_width)
+            xmax = max(xmin + min_text_width, xmax)
+
+        elif widget.type == "checkbox":
+            y_center = min(max(checkbox_half_h, y_center), 1000 - checkbox_half_h)
+            x_center = min(max(checkbox_half_w, x_center), 1000 - checkbox_half_w)
+            ymin = y_center - checkbox_half_h
+            xmin = x_center - checkbox_half_w
+            ymax = y_center + checkbox_half_h
+            xmax = x_center + checkbox_half_w
+
+        elif widget.type == "signature":
+            y_center = min(max(signature_half_h, y_center), 1000 - signature_half_h)
+            x_center = min(max(signature_half_w, x_center), 1000 - signature_half_w)
+            ymin = y_center - signature_half_h
+            xmin = x_center - signature_half_w
+            ymax = y_center + signature_half_h
+            xmax = x_center + signature_half_w
+
+        widget.box_2d = [ymin, xmin, ymax, xmax]
+
+
+# TODO: review
 def add_missing_widgets(
     doc: pymupdf.Document, missing_widgets: list[MissingWidget]
 ) -> None:
-    pass  # TODO: implement
+    type_map = {
+        "text": pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT,
+        "checkbox": pymupdf.mupdf.PDF_WIDGET_TYPE_CHECKBOX,
+        "signature": pymupdf.mupdf.PDF_WIDGET_TYPE_SIGNATURE,
+    }
+
+    for idx, missing_widget in enumerate(missing_widgets):
+        if not (0 <= missing_widget.page < len(doc)):
+            continue
+        page = doc[missing_widget.page]
+        ymin, xmin, ymax, xmax = missing_widget.box_2d
+        x0 = (xmin / 1000) * page.rect.width
+        y0 = (ymin / 1000) * page.rect.height
+        x1 = (xmax / 1000) * page.rect.width
+        y1 = (ymax / 1000) * page.rect.height
+
+        rect = pymupdf.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        if rect.is_empty:
+            continue
+
+        widget = pymupdf.Widget()
+        widget.rect = rect
+        widget.field_type = type_map.get(
+            missing_widget.type, pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT
+        )
+        widget.field_name = f"{missing_widget.type}_{missing_widget.page}_{idx}"
+        page.add_widget(widget)
 
 
 # AIGEN ADD END

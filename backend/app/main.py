@@ -1,5 +1,20 @@
+# AIGEN MOD START
+
+# from pathlib import Path
+
+# import sentry_sdk
+# from fastapi import FastAPI
+# from fastapi.routing import APIRoute
+# from starlette.middleware.cors import CORSMiddleware
+
+# from app.api.main import api_router
+# from app.core.config import settings
+
+# AIGEN MOD CONT
+
 from pathlib import Path
 
+import logfire
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
@@ -8,7 +23,18 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.main import api_router
 from app.core.config import settings
 
+# AIGEN MOD END
+
 FRONTEND_DIR = Path(__file__).parent / "frontend"
+
+# AIGEN MOD START
+# 'if-token-present' means nothing will be sent (and the app will work) if you don't have logfire configured
+logfire.configure(
+    token=settings.LOGFIRE_TOKEN,
+    send_to_logfire="if-token-present",
+)
+logfire.instrument_pydantic_ai()
+# AIGEN MOD END
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:

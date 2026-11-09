@@ -8,7 +8,13 @@ import pymupdf
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import Response
 
-from app.utils import add_missing_widgets, detect_missing_widgets, highlight_widgets
+from app.utils import (
+    add_missing_widgets,
+    clean_malformed_widgets,
+    detect_missing_widgets,
+    highlight_widgets,
+    postprocess_missing_widgets,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -29,10 +35,12 @@ async def upload_document(file: UploadFile) -> PDFResponse:
         raise HTTPException(status_code=422, detail="Invalid PDF content")
 
     with pymupdf.open(stream=content, filetype="pdf") as doc:
+        clean_malformed_widgets(doc)
         with pymupdf.open() as doc_copy:
             doc_copy.insert_pdf(doc)
             highlight_widgets(doc_copy)
             missing_widgets = await detect_missing_widgets(doc_copy)
+        postprocess_missing_widgets(missing_widgets)
         add_missing_widgets(doc, missing_widgets)
         highlight_widgets(doc)  # TODO: continue as intended instead
         content = doc.tobytes()
