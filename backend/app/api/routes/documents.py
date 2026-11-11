@@ -13,6 +13,7 @@ from app.utils import (
     clean_malformed_widgets,
     detect_missing_widgets,
     highlight_widgets,
+    label_widgets,
     postprocess_missing_widgets,
 )
 
@@ -40,9 +41,14 @@ async def upload_document(file: UploadFile) -> PDFResponse:
             doc_copy.insert_pdf(doc)
             highlight_widgets(doc_copy)
             missing_widgets = await detect_missing_widgets(doc_copy)
-        postprocess_missing_widgets(missing_widgets)
-        add_missing_widgets(doc, missing_widgets)
-        highlight_widgets(doc)  # TODO: continue as intended instead
+        missing_widgets_post = postprocess_missing_widgets(doc, missing_widgets)
+        add_missing_widgets(doc, missing_widgets_post)
+        with pymupdf.open() as doc_copy:
+            doc_copy.insert_pdf(doc)
+            label_widgets(doc_copy)
+            # value_keys_map = await infer_value_keys_map(doc_copy, value_keys)
+        label_widgets(doc)  # TODO: continue as intended instead
+
         content = doc.tobytes()
 
     return PDFResponse(headers=headers, content=content)

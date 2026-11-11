@@ -20,7 +20,9 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import cleandoc
+from itertools import product
 from pathlib import Path
+from string import ascii_uppercase
 from typing import Any, Literal
 
 import emails
@@ -163,8 +165,11 @@ def highlight_widgets(doc: pymupdf.Document) -> None:
     for page in doc.pages():
         for widget in page.widgets():
             if widget.rect and not widget.rect.is_empty:
-                widget.border_color = (1, 0, 0)
+                color = (1, 0, 0)
+                widget.border_color = color
                 widget.update()
+                if widget.field_type == pymupdf.mupdf.PDF_WIDGET_TYPE_SIGNATURE:
+                    page.draw_rect(widget.rect, color=color)
 
 
 ai_studio_api_key = settings.AI_STUDIO_API_KEY or "invalid-api-key"
@@ -255,78 +260,160 @@ async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
     return result.output
 
 
-def postprocess_missing_widgets(widgets: list[MissingWidget]) -> None:
-    a4_ratio: float = 297 / 210
-
-    text_height: int = 16
-    left_padding: int = 4
-    min_text_width: int = round(text_height * a4_ratio)
-    checkbox_half_h: int = 12 // 2
-    checkbox_half_w: int = round(checkbox_half_h * a4_ratio)
-    signature_half_h: int = 32 // 2
-    signature_half_w: int = round(signature_half_h * 2 * a4_ratio)
-
-    for widget in widgets:
-        ymin, xmin, ymax, xmax = widget.box_2d
-        y_center: int = (ymin + ymax) // 2
-        x_center: int = (xmin + xmax) // 2
-
-        if widget.type == "text":
-            ymax = max(text_height, ymax)
-            ymin = ymax - text_height
-            xmin = min(xmin + left_padding, 1000 - min_text_width)
-            xmax = max(xmin + min_text_width, xmax)
-
-        elif widget.type == "checkbox":
-            y_center = min(max(checkbox_half_h, y_center), 1000 - checkbox_half_h)
-            x_center = min(max(checkbox_half_w, x_center), 1000 - checkbox_half_w)
-            ymin = y_center - checkbox_half_h
-            xmin = x_center - checkbox_half_w
-            ymax = y_center + checkbox_half_h
-            xmax = x_center + checkbox_half_w
-
-        elif widget.type == "signature":
-            y_center = min(max(signature_half_h, y_center), 1000 - signature_half_h)
-            x_center = min(max(signature_half_w, x_center), 1000 - signature_half_w)
-            ymin = y_center - signature_half_h
-            xmin = x_center - signature_half_w
-            ymax = y_center + signature_half_h
-            xmax = x_center + signature_half_w
-
-        widget.box_2d = [ymin, xmin, ymax, xmax]
+class MissingWidgetPost(BaseModel):
+    page: int
+    rect: list[float]
+    type: int
 
 
-# TODO: review
-def add_missing_widgets(
-    doc: pymupdf.Document, missing_widgets: list[MissingWidget]
-) -> None:
+TEXT_HEIGHT: float = 16
+LEFT_MARGIN: float = 4
+MIN_TEXT_WIDTH: float = TEXT_HEIGHT
+CHECKBOX_HALF_H: float = 12 / 2
+CHECKBOX_HALF_W: float = CHECKBOX_HALF_H
+SIGNATURE_HALF_H: float = 32 / 2
+SIGNATURE_HALF_W: float = SIGNATURE_HALF_H * 2
+
+
+def postprocess_missing_widgets(
+    doc: pymupdf.Document, widgets: list[MissingWidget]
+) -> list[MissingWidgetPost]:
     type_map = {
         "text": pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT,
         "checkbox": pymupdf.mupdf.PDF_WIDGET_TYPE_CHECKBOX,
         "signature": pymupdf.mupdf.PDF_WIDGET_TYPE_SIGNATURE,
     }
 
-    for idx, missing_widget in enumerate(missing_widgets):
-        if not (0 <= missing_widget.page < len(doc)):
-            continue
-        page = doc[missing_widget.page]
-        ymin, xmin, ymax, xmax = missing_widget.box_2d
+    result: list[MissingWidgetPost] = []
+    for widget in widgets:
+        page = doc[widget.page]
+        ymin, xmin, ymax, xmax = widget.box_2d
         x0 = (xmin / 1000) * page.rect.width
         y0 = (ymin / 1000) * page.rect.height
         x1 = (xmax / 1000) * page.rect.width
         y1 = (ymax / 1000) * page.rect.height
 
-        rect = pymupdf.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-        if rect.is_empty:
-            continue
+        y_center = (y0 + y1) / 2
+        x_center = (x0 + x1) / 2
 
+        if widget.type == "text":
+            y1 = max(TEXT_HEIGHT, y1)
+            y0 = y1 - TEXT_HEIGHT
+            x0 = min(x0 + LEFT_MARGIN, page.rect.width - MIN_TEXT_WIDTH)
+            x1 = max(x0 + MIN_TEXT_WIDTH, x1)
+
+        elif widget.type == "checkbox":
+            y_center = min(
+                max(CHECKBOX_HALF_H, y_center), page.rect.height - CHECKBOX_HALF_H
+            )
+            x_center = min(
+                max(CHECKBOX_HALF_W, x_center), page.rect.width - CHECKBOX_HALF_W
+            )
+            y0 = y_center - CHECKBOX_HALF_H
+            x0 = x_center - CHECKBOX_HALF_W
+            y1 = y_center + CHECKBOX_HALF_H
+            x1 = x_center + CHECKBOX_HALF_W
+
+        elif widget.type == "signature":
+            y_center = min(
+                max(SIGNATURE_HALF_H, y_center), page.rect.height - SIGNATURE_HALF_H
+            )
+            x_center = min(
+                max(SIGNATURE_HALF_W, x_center), page.rect.width - SIGNATURE_HALF_W
+            )
+            y0 = y_center - SIGNATURE_HALF_H
+            x0 = x_center - SIGNATURE_HALF_W
+            y1 = y_center + SIGNATURE_HALF_H
+            x1 = x_center + SIGNATURE_HALF_W
+
+        result.append(
+            MissingWidgetPost(
+                page=widget.page,
+                rect=[x0, y0, x1, y1],
+                type=type_map[widget.type],
+            )
+        )
+    return result
+
+
+def add_missing_widgets(
+    doc: pymupdf.Document, missing_widgets: list[MissingWidgetPost]
+) -> None:
+    for idx, missing_widget in enumerate(missing_widgets):
+        page = doc[missing_widget.page]
+        rect = pymupdf.Rect(missing_widget.rect)
         widget = pymupdf.Widget()
         widget.rect = rect
-        widget.field_type = type_map.get(
-            missing_widget.type, pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT
-        )
-        widget.field_name = f"{missing_widget.type}_{missing_widget.page}_{idx}"
+        widget.field_type = missing_widget.type
+        widget.field_name = f"missing_widget_{missing_widget.page}_{idx}"
         page.add_widget(widget)
+
+
+def _identify_widgets(doc: pymupdf.Document) -> list[dict[str, pymupdf.Widget]]:
+    """
+    Needed because field_name is required on widget addition and immutable afterwards.
+    """
+    lookup = []
+    ids = [f"{a}{b}" for a, b in product(ascii_uppercase, repeat=2)]
+    for page in doc.pages():
+        widgets = sorted(page.widgets(), key=lambda w: (w.rect.y0, w.rect.x0))
+        assert len(widgets) <= len(ids)
+        lookup.append(dict(zip(ids, widgets, strict=False)))
+    return lookup
+
+
+def label_widgets(doc: pymupdf.Document) -> None:
+
+    # font size
+    badge_h: float = 10
+    padding: float = 1
+    fontname: str = "helv"
+    font = pymupdf.Font(fontname)
+    cap_height_ratio = font.glyph_bbox(ord("H")).height
+    fontsize = (badge_h - 2 * padding) / cap_height_ratio
+
+    # badge width
+    lookup = _identify_widgets(doc)
+    ids = [id for page_lookup in lookup for id in page_lookup.keys()]
+    if not ids:
+        return
+    max_text_w = max(font.text_length(id, fontsize) for id in ids)
+    badge_w = max_text_w + 2 * padding
+
+    colors = {
+        pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT: (0.7, 0.0, 0.0),  # dark red
+        pymupdf.mupdf.PDF_WIDGET_TYPE_CHECKBOX: (0.0, 0.2, 0.65),  # dark blue
+        pymupdf.mupdf.PDF_WIDGET_TYPE_SIGNATURE: (0.0, 0.5, 0.15),  # dark green
+    }
+    for page, page_lookup in zip(doc.pages(), lookup, strict=True):
+        for id, widget in page_lookup.items():
+            assert widget.rect is not None
+            color = colors[widget.field_type]
+
+            # widget rect
+            page.draw_rect(widget.rect, color=color)
+
+            # badge rect
+            x0 = min(widget.rect.x0, widget.rect.x1 - badge_w)
+            y0 = widget.rect.y0
+            rect = pymupdf.Rect(x0, y0, x0 + badge_w, y0 + badge_h)
+            page.draw_rect(rect, fill=color, color=color)
+
+            # badge text
+            text_w = font.text_length(id, fontsize)
+            baseline_x0 = x0 + (badge_w - text_w) / 2
+            baseline_y0 = y0 + badge_h - padding
+            page.insert_text(
+                pymupdf.Point(baseline_x0, baseline_y0),
+                id,
+                fontname=fontname,
+                fontsize=fontsize,
+                color=(1, 1, 1),
+            )
+
+
+async def infer_value_keys_map(doc):
+    pass
 
 
 # AIGEN ADD END
