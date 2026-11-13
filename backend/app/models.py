@@ -1,8 +1,22 @@
+# AIGEN MOD START
+
+# import uuid
+# from datetime import UTC, datetime
+
+# from pydantic import EmailStr
+# from sqlmodel import Field, Relationship, SQLModel
+
+# AIGEN MOD CONT
+
 import uuid
 from datetime import UTC, datetime
+from string import Formatter
+from typing import Self
 
-from pydantic import EmailStr
+from pydantic import EmailStr, model_validator
 from sqlmodel import Field, Relationship, SQLModel
+
+# AIGEN MOD END
 
 
 def get_datetime_utc() -> datetime:
@@ -124,3 +138,35 @@ class TokenPayload(SQLModel):
 class NewPassword(SQLModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
+
+
+# AIGEN ADD START
+
+
+class Profile(SQLModel):
+    template: str
+    sensitive_data: dict[str, str]
+
+    @model_validator(mode="after")
+    def validate_sensitive_data(self) -> Self:
+        try:
+            template_keys = {
+                field_name.split(".")[0].split("[")[0]
+                for _, field_name, _, _ in Formatter().parse(self.template)
+                if field_name is not None
+            }
+        except ValueError as err:
+            raise ValueError(
+                f"Invalid format string syntax in template: {err}"
+            ) from err
+
+        missing_keys = template_keys - set(self.sensitive_data.keys())
+        if missing_keys:
+            missing_str = ", ".join(sorted(missing_keys))
+            raise ValueError(
+                f"Missing sensitive data for placeholder(s) in template: {missing_str}"
+            )
+        return self
+
+
+# AIGEN ADD END

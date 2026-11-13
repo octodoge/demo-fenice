@@ -23,7 +23,7 @@ from inspect import cleandoc
 from itertools import product
 from pathlib import Path
 from string import Formatter, ascii_uppercase
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal
 
 import emails
 import jwt
@@ -37,7 +37,6 @@ from pydantic import (
     ValidationInfo,
     create_model,
     field_validator,
-    model_validator,
 )
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
@@ -45,6 +44,7 @@ from pydantic_ai.providers.google import GoogleProvider
 
 from app.core import security
 from app.core.config import settings
+from app.models import Profile
 
 # AIGEN MOD END
 
@@ -444,32 +444,6 @@ value_inferrer = Agent(
         """
     ),
 )
-
-
-class Profile(BaseModel):
-    template: str
-    sensitive_data: dict[str, str]
-
-    @model_validator(mode="after")
-    def validate_sensitive_data(self) -> Self:
-        try:
-            template_keys = {
-                field_name.split(".")[0].split("[")[0]
-                for _, field_name, _, _ in Formatter().parse(self.template)
-                if field_name is not None
-            }
-        except ValueError as err:
-            raise ValueError(
-                f"Invalid format string syntax in template: {err}"
-            ) from err
-
-        missing_keys = template_keys - set(self.sensitive_data.keys())
-        if missing_keys:
-            missing_str = ", ".join(sorted(missing_keys))
-            raise ValueError(
-                f"Missing sensitive data for placeholder(s) in template: {missing_str}"
-            )
-        return self
 
 
 def get_profile() -> Profile:

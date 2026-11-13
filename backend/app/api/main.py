@@ -9,7 +9,7 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import documents, items, login, private, users, utils
+from app.api.routes import documents, items, login, private, profile, users, utils
 from app.core.config import settings
 
 # AIGEN MOD END
@@ -21,6 +21,7 @@ api_router.include_router(utils.router)
 api_router.include_router(items.router)
 # AIGEN ADD START
 api_router.include_router(documents.router)
+api_router.include_router(profile.router)
 # AIGEN ADD END
 
 
