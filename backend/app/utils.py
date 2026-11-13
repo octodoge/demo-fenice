@@ -357,17 +357,17 @@ def add_missing_widgets(
         page.add_widget(widget)
 
 
-def _identify_widgets(doc: pymupdf.Document) -> list[dict[str, pymupdf.Widget]]:
+def _identify_widgets(page: pymupdf.Page) -> dict[str, pymupdf.Widget]:
     """
     Needed because field_name is required on widget addition and immutable afterwards.
+    Takes `page` so the caller keeps a ref to it: PyMuPDF widgets don't hold a
+    Python ref to their Page, so garbage-collecting `page` unbinds them in C and
+    breaks `widget.update()`.
     """
-    lookup = []
     ids = [f"{a}{b}" for a, b in product(ascii_uppercase, repeat=2)]
-    for page in doc.pages():
-        widgets = sorted(page.widgets(), key=lambda w: (w.rect.y0, w.rect.x0))
-        assert len(widgets) <= len(ids)
-        lookup.append(dict(zip(ids, widgets, strict=False)))
-    return lookup
+    widgets = sorted(page.widgets(), key=lambda w: (w.rect.y0, w.rect.x0))
+    assert len(widgets) <= len(ids)
+    return dict(zip(ids, widgets, strict=False))
 
 
 def label_widgets(doc: pymupdf.Document) -> None:
@@ -381,7 +381,7 @@ def label_widgets(doc: pymupdf.Document) -> None:
     fontsize = (badge_h - 2 * padding) / cap_height_ratio
 
     # badge width
-    lookup = _identify_widgets(doc)
+    lookup = [_identify_widgets(page) for page in doc.pages()]
     ids = [id for page_lookup in lookup for id in page_lookup.keys()]
     if not ids:
         return
@@ -561,7 +561,8 @@ def build_output_schema(
     }
 
     pages: dict[str, Any] = {}
-    for idx, page_lookup in enumerate(_identify_widgets(doc)):
+    for idx, page in enumerate(doc.pages()):
+        page_lookup = _identify_widgets(page)
         fields: dict[str, Any] = {
             wid: (type_map[w.field_type], ...)
             for wid, w in page_lookup.items()
@@ -588,11 +589,10 @@ def _add_review_annot(page: pymupdf.Page, rect: pymupdf.Rect, note: str) -> None
 
 
 def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None:
-    lookup = _identify_widgets(doc)
     for page_key, page_model in values:
         page_idx = int(page_key.removeprefix("page_"))
         page = doc[page_idx]
-        page_lookup = lookup[page_idx]
+        page_lookup = _identify_widgets(page)
 
         for wid, val in page_model:
             widget = page_lookup[wid]
