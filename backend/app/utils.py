@@ -22,15 +22,23 @@ from datetime import UTC, datetime, timedelta
 from inspect import cleandoc
 from itertools import product
 from pathlib import Path
-from string import ascii_uppercase
-from typing import Any, Literal
+from string import Formatter, ascii_uppercase
+from typing import Annotated, Any, Literal, Self
 
 import emails
 import jwt
 import pymupdf
 from jinja2 import Template
 from jwt.exceptions import InvalidTokenError
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    ValidationInfo,
+    create_model,
+    field_validator,
+    model_validator,
+)
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
@@ -412,8 +420,191 @@ def label_widgets(doc: pymupdf.Document) -> None:
             )
 
 
-async def infer_value_keys_map(doc):
-    pass
+value_inferrer = Agent(
+    GoogleModel(
+        "gemini-3.8-flash",
+        provider=GoogleProvider(api_key=ai_studio_api_key),
+    ),
+    model_settings=GoogleModelSettings(thinking="medium"),
+    instructions=cleandoc(
+        """
+        You will receive a company profile (with sensitive values redacted as
+        {placeholder} tags) and images of PDF form pages.
+        Each page is preceded by its key (e.g. page_0, page_1).
+        Fillable widgets are outlined and labeled with a 2-letter badge ID
+        (red = text, blue = checkbox; ignore green signature widgets).
+        For each widget ID:
+        - Text widgets: return the text to fill in. You may use the exact
+          {placeholder} tags from the profile as Python format placeholders
+          (e.g. "{company_name} - {vat_number}"). Escape literal braces as {{ }}.
+        - Checkboxes: return true or false.
+        - If a field cannot be filled (missing info or a checkbox depends on
+          a redacted {placeholder}), DO NOT guess: return an Annotation with a
+          concise note explaining what is needed (and how to improve the profile).
+        """
+    ),
+)
+
+
+class Profile(BaseModel):
+    template: str
+    sensitive_data: dict[str, str]
+
+    @model_validator(mode="after")
+    def validate_sensitive_data(self) -> Self:
+        try:
+            template_keys = {
+                field_name.split(".")[0].split("[")[0]
+                for _, field_name, _, _ in Formatter().parse(self.template)
+                if field_name is not None
+            }
+        except ValueError as err:
+            raise ValueError(
+                f"Invalid format string syntax in template: {err}"
+            ) from err
+
+        missing_keys = template_keys - set(self.sensitive_data.keys())
+        if missing_keys:
+            missing_str = ", ".join(sorted(missing_keys))
+            raise ValueError(
+                f"Missing sensitive data for placeholder(s) in template: {missing_str}"
+            )
+        return self
+
+
+def get_profile() -> Profile:
+    return Profile(
+        template=cleandoc(
+            """
+            Company Name: {company_name}
+            Legal Form: S.r.l. (Limited Liability Company)
+            VAT Number: {vat_number}
+            Tax Code: {tax_code}
+            Registered Office: {address}, {postal_code} {city} ({province}), Italy
+            PEC / Email: {pec_email}
+            Phone: {phone}
+            IBAN: {iban}
+            Legal Representative: {legal_rep_name} (Tax ID: {legal_rep_tax_code})
+
+            Company Details:
+            - Micro/Small Enterprise: Yes (10-49 employees)
+            - Year Established: 2019
+            - Sector: Software Development & IT Consulting
+            - Certifications: ISO 9001
+            - Registered in the Chamber of Commerce (CCIAA)
+            - Not in liquidation or bankruptcy; no pending tax arrears
+            """
+        ),
+        sensitive_data={
+            "company_name": "Fenice Tech S.r.l.",
+            "vat_number": "IT12345678901",
+            "tax_code": "12345678901",
+            "address": "Via Roma 42",
+            "postal_code": "20121",
+            "city": "Milano",
+            "province": "MI",
+            "pec_email": "fenicetech@pec.it",
+            "phone": "+39 02 1234567",
+            "iban": "IT60X0542811101000000123456",
+            "legal_rep_name": "Mario Rossi",
+            "legal_rep_tax_code": "RSSMRA80A01F205X",
+        },
+    )
+
+
+async def infer_values(doc: pymupdf.Document, profile: Profile) -> BaseModel | None:
+    output_schema = build_output_schema(doc, set(profile.sensitive_data.keys()))
+    if not output_schema.model_fields:
+        return None
+
+    prompt_parts: list[str | BinaryContent] = [
+        f"Company profile:\n{profile.template}",
+    ]
+    for page_idx, page in enumerate(doc.pages()):
+        prompt_parts.append(f"--- page_{page_idx} ---")
+        pix = page.get_pixmap(dpi=150)
+        prompt_parts.append(
+            BinaryContent(data=pix.tobytes("png"), media_type="image/png")
+        )
+
+    result = await value_inferrer.run(prompt_parts, output_type=output_schema)
+    return result.output
+
+
+class Annotation(BaseModel):
+    note: str
+
+
+def _make_format_str(allowed_keys: set[str]) -> type[str]:
+    def _validate(value: str) -> str:
+        try:
+            keys = {
+                name for _, name, _, _ in Formatter().parse(value) if name is not None
+            }
+        except ValueError as err:
+            raise ValueError(f"Invalid format string syntax: {err}") from err
+
+        if unknown := keys - allowed_keys:
+            raise ValueError(f"Unknown placeholder(s): {', '.join(sorted(unknown))}")
+        return value
+
+    return Annotated[str, AfterValidator(_validate)]  # type: ignore
+
+
+def build_output_schema(
+    doc: pymupdf.Document, allowed_keys: set[str]
+) -> type[BaseModel]:
+    FormatStr = _make_format_str(allowed_keys)
+    type_map: dict[int, Any] = {
+        pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT: FormatStr | Annotation,
+        pymupdf.mupdf.PDF_WIDGET_TYPE_CHECKBOX: bool | Annotation,
+    }
+
+    pages: dict[str, Any] = {}
+    for idx, page_lookup in enumerate(_identify_widgets(doc)):
+        fields: dict[str, Any] = {
+            wid: (type_map[w.field_type], ...)
+            for wid, w in page_lookup.items()
+            if w.field_type in type_map
+        }
+        if fields:
+            page_model = create_model(f"Page{idx}Model", **fields)
+            pages[f"page_{idx}"] = (page_model, ...)
+
+    return create_model("OutputSchema", **pages)
+
+
+def _add_review_annot(page: pymupdf.Page, rect: pymupdf.Rect, note: str) -> None:
+    icon_size = 24
+    pr = page.rect
+    x = rect.x1 + 2 if rect.x1 + 2 + icon_size <= pr.x1 else rect.x0 - icon_size
+    x = min(max(x, pr.x0 + 2), pr.x1 - icon_size)
+    y = min(max(rect.y0, pr.y0 + 2), pr.y1 - icon_size)
+
+    annot = page.add_text_annot(pymupdf.Point(x, y), note, icon="Note")
+    annot.set_colors(stroke=(1, 0, 0))
+    annot.set_flags(annot.flags & ~pymupdf.mupdf.PDF_ANNOT_IS_PRINT)
+    annot.update()
+
+
+def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None:
+    lookup = _identify_widgets(doc)
+    for page_key, page_model in values:
+        page_idx = int(page_key.removeprefix("page_"))
+        page = doc[page_idx]
+        page_lookup = lookup[page_idx]
+
+        for wid, val in page_model:
+            widget = page_lookup[wid]
+            if isinstance(val, Annotation):
+                assert widget.rect is not None
+                _add_review_annot(page, widget.rect, val.note)
+            elif isinstance(val, bool):
+                widget.field_value = val
+                widget.update()
+            elif isinstance(val, str):
+                widget.field_value = val.format(**profile.sensitive_data)
+                widget.update()
 
 
 # AIGEN ADD END

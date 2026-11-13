@@ -12,7 +12,10 @@ from app.utils import (
     add_missing_widgets,
     clean_malformed_widgets,
     detect_missing_widgets,
+    fill_pdf,
+    get_profile,
     highlight_widgets,
+    infer_values,
     label_widgets,
     postprocess_missing_widgets,
 )
@@ -43,11 +46,13 @@ async def upload_document(file: UploadFile) -> PDFResponse:
             missing_widgets = await detect_missing_widgets(doc_copy)
         missing_widgets_post = postprocess_missing_widgets(doc, missing_widgets)
         add_missing_widgets(doc, missing_widgets_post)
+        profile = get_profile()
         with pymupdf.open() as doc_copy:
             doc_copy.insert_pdf(doc)
             label_widgets(doc_copy)
-            # value_keys_map = await infer_value_keys_map(doc_copy, value_keys)
-        label_widgets(doc)  # TODO: continue as intended instead
+            values = await infer_values(doc_copy, profile)
+        if values is not None:
+            fill_pdf(doc, values, profile)
 
         content = doc.tobytes()
 
