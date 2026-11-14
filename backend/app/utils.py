@@ -41,10 +41,11 @@ from pydantic import (
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
+from sqlmodel import Session, select
 
 from app.core import security
 from app.core.config import settings
-from app.models import Profile
+from app.models import Profile, ProfileBase
 
 # AIGEN MOD END
 
@@ -437,7 +438,11 @@ value_inferrer = Agent(
         - Text widgets: return the text to fill in. You may use the exact
           {placeholder} tags from the profile as Python format placeholders
           (e.g. "{company_name} - {vat_number}"). Escape literal braces as {{ }}.
-        - Checkboxes: return true or false.
+        - Checkboxes: return true or false. Always return true for mandatory
+          "must-accept" declarations and consents where the applicant has no
+          real choice (e.g. no criminal convictions, not in
+          bankruptcy/liquidation, no tax arrears, having read the rules,
+          privacy/GDPR consent).
         - If a field cannot be filled (missing info or a checkbox depends on
           a redacted {placeholder}), DO NOT guess: return an Annotation with a
           concise note explaining what is needed (and how to improve the profile).
@@ -446,44 +451,14 @@ value_inferrer = Agent(
 )
 
 
-def get_profile() -> Profile:
-    return Profile(
-        template=cleandoc(
-            """
-            Company Name: {company_name}
-            Legal Form: S.r.l. (Limited Liability Company)
-            VAT Number: {vat_number}
-            Tax Code: {tax_code}
-            Registered Office: {address}, {postal_code} {city} ({province}), Italy
-            PEC / Email: {pec_email}
-            Phone: {phone}
-            IBAN: {iban}
-            Legal Representative: {legal_rep_name} (Tax ID: {legal_rep_tax_code})
-
-            Company Details:
-            - Micro/Small Enterprise: Yes (10-49 employees)
-            - Year Established: 2019
-            - Sector: Software Development & IT Consulting
-            - Certifications: ISO 9001
-            - Registered in the Chamber of Commerce (CCIAA)
-            - Not in liquidation or bankruptcy; no pending tax arrears
-            """
-        ),
-        sensitive_data={
-            "company_name": "Fenice Tech S.r.l.",
-            "vat_number": "IT12345678901",
-            "tax_code": "12345678901",
-            "address": "Via Roma 42",
-            "postal_code": "20121",
-            "city": "Milano",
-            "province": "MI",
-            "pec_email": "fenicetech@pec.it",
-            "phone": "+39 02 1234567",
-            "iban": "IT60X0542811101000000123456",
-            "legal_rep_name": "Mario Rossi",
-            "legal_rep_tax_code": "RSSMRA80A01F205X",
-        },
-    )
+def get_profile(session: Session) -> Profile:
+    profile = session.exec(select(Profile)).first()
+    if not profile:
+        profile = Profile(template="", sensitive_data={})
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+    return profile
 
 
 async def infer_values(doc: pymupdf.Document, profile: Profile) -> BaseModel | None:
@@ -579,6 +554,78 @@ def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None
             elif isinstance(val, str):
                 widget.field_value = val.format(**profile.sensitive_data)
                 widget.update()
+
+
+def _validate_template_str(value: str) -> str:
+    try:
+        keys = [name for _, name, _, _ in Formatter().parse(value) if name is not None]
+    except ValueError as err:
+        raise ValueError(f"Invalid format string syntax: {err}") from err
+
+    if invalid := [k for k in keys if not k.isidentifier()]:
+        raise ValueError(
+            "Placeholders must be valid Python identifiers: "
+            f"{', '.join(sorted(set(invalid)))}"
+        )
+    return value
+
+
+TemplateStr = Annotated[str, AfterValidator(_validate_template_str)]
+
+
+template_inferrer = Agent(
+    GoogleModel(
+        "gemini-3.8-flash",
+        provider=GoogleProvider(api_key=ai_studio_api_key),
+    ),
+    model_settings=GoogleModelSettings(thinking="medium"),
+    output_type=TemplateStr,
+    instructions=cleandoc(
+        """
+        You will receive images of pages from one or more unfilled PDF forms.
+        Create a reusable profile template containing the information needed
+        to fill forms like these.
+        Follow these rules:
+        - For direct identifiers and sensitive text values (e.g. names, VAT/tax
+          codes, addresses, emails, phone numbers, IBANs, ID numbers), use
+          {snake_case} Python format placeholders.
+        - For non-identifying attributes, categories, and facts needed to answer
+          choice checkboxes (e.g. legal form, enterprise size, gender, sector,
+          certifications), write clear entries with angle-bracket hints for the
+          user to edit (e.g. "Legal Form: <e.g. S.r.l., S.p.A.>").
+          Never use curly braces { } for these.
+        - Ignore mandatory "must-accept" declarations and consents where the
+          applicant has no real choice (e.g. no criminal convictions, not in
+          bankruptcy/liquidation, no tax arrears, having read the rules,
+          privacy/GDPR consent), as well as form-specific procedural fields
+          (e.g. signature dates, attachment checklists).
+        - Return only the profile template text.
+        """
+    ),
+)
+
+
+async def infer_template(docs: list[pymupdf.Document]) -> ProfileBase:
+    prompt_parts: list[str | BinaryContent] = []
+    for doc_idx, doc in enumerate(docs):
+        for page_idx, page in enumerate(doc.pages()):
+            prompt_parts.append(f"--- Document {doc_idx}, Page {page_idx} ---")
+            pix = page.get_pixmap(dpi=150)
+            prompt_parts.append(
+                BinaryContent(data=pix.tobytes("png"), media_type="image/png")
+            )
+
+    if not prompt_parts:
+        return ProfileBase(template="", sensitive_data={})
+
+    result = await template_inferrer.run(prompt_parts)
+    template = result.output
+    sensitive_data = {
+        field_name: ""
+        for _, field_name, _, _ in Formatter().parse(template)
+        if field_name is not None
+    }
+    return ProfileBase(template=template, sensitive_data=sensitive_data)
 
 
 # AIGEN ADD END

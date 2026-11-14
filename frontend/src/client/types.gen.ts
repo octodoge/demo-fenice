@@ -45,6 +45,16 @@ export type Body_login_login_access_token = {
 };
 
 /**
+ * Body_profile-infer_profile_template
+ */
+export type Body_profile_infer_profile_template = {
+    /**
+     * Files
+     */
+    files: Array<Blob | File>;
+};
+
+/**
  * HTTPValidationError
  */
 export type HTTPValidationError = {
@@ -166,6 +176,62 @@ export type PrivateUserCreate = {
      * Is Verified
      */
     is_verified?: boolean;
+};
+
+/**
+ * ProfileBase
+ */
+export type ProfileBase = {
+    /**
+     * Template
+     */
+    template: string;
+    /**
+     * Sensitive Data
+     */
+    sensitive_data?: {
+        [key: string]: string;
+    };
+};
+
+/**
+ * ProfileCreate
+ */
+export type ProfileCreate = {
+    /**
+     * Template
+     */
+    template: string;
+    /**
+     * Sensitive Data
+     */
+    sensitive_data?: {
+        [key: string]: string;
+    };
+};
+
+/**
+ * ProfilePublic
+ */
+export type ProfilePublic = {
+    /**
+     * Template
+     */
+    template: string;
+    /**
+     * Sensitive Data
+     */
+    sensitive_data?: {
+        [key: string]: string;
+    };
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Created At
+     */
+    created_at?: string | null;
 };
 
 /**
@@ -955,6 +1021,72 @@ export type documentsUploadDocumentResponses = {
 };
 
 export type documentsUploadDocumentResponse = documentsUploadDocumentResponses[keyof documentsUploadDocumentResponses];
+
+export type profileReadProfileData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/profile/';
+};
+
+export type profileReadProfileResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProfilePublic;
+};
+
+export type profileReadProfileResponse = profileReadProfileResponses[keyof profileReadProfileResponses];
+
+export type profileReplaceProfileData = {
+    body: ProfileCreate;
+    path?: never;
+    query?: never;
+    url: '/api/v1/profile/';
+};
+
+export type profileReplaceProfileErrors = {
+    /**
+     * Validation Error
+     */
+    422: HTTPValidationError;
+};
+
+export type profileReplaceProfileError = profileReplaceProfileErrors[keyof profileReplaceProfileErrors];
+
+export type profileReplaceProfileResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProfilePublic;
+};
+
+export type profileReplaceProfileResponse = profileReplaceProfileResponses[keyof profileReplaceProfileResponses];
+
+export type profileInferProfileTemplateData = {
+    body: Body_profile_infer_profile_template;
+    path?: never;
+    query?: never;
+    url: '/api/v1/profile/infer-template';
+};
+
+export type profileInferProfileTemplateErrors = {
+    /**
+     * Validation Error
+     */
+    422: HTTPValidationError;
+};
+
+export type profileInferProfileTemplateError = profileInferProfileTemplateErrors[keyof profileInferProfileTemplateErrors];
+
+export type profileInferProfileTemplateResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProfileBase;
+};
+
+export type profileInferProfileTemplateResponse = profileInferProfileTemplateResponses[keyof profileInferProfileTemplateResponses];
 
 export type privateCreateUserData = {
     body: PrivateUserCreate;

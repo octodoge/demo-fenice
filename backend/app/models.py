@@ -14,7 +14,7 @@ from string import Formatter
 from typing import Self
 
 from pydantic import EmailStr, model_validator
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import JSON, Field, Relationship, SQLModel
 
 # AIGEN MOD END
 
@@ -143,9 +143,10 @@ class NewPassword(SQLModel):
 # AIGEN ADD START
 
 
-class Profile(SQLModel):
+# Shared properties
+class ProfileBase(SQLModel):
     template: str
-    sensitive_data: dict[str, str]
+    sensitive_data: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_sensitive_data(self) -> Self:
@@ -167,6 +168,24 @@ class Profile(SQLModel):
                 f"Missing sensitive data for placeholder(s) in template: {missing_str}"
             )
         return self
+
+
+# Properties to receive on profile creation
+class ProfileCreate(ProfileBase):
+    pass
+
+
+# Database model, database table inferred from class name
+class Profile(ProfileBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(default_factory=get_datetime_utc)
+    sensitive_data: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
+
+
+# Properties to return via API, id is always required
+class ProfilePublic(ProfileBase):
+    id: uuid.UUID
+    created_at: datetime | None = None
 
 
 # AIGEN ADD END
