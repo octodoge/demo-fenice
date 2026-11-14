@@ -16,7 +16,13 @@
 
 /* AIGEN MOD CONT */
 
-import { Briefcase, FileText, Home, Users } from "lucide-react"
+import {
+  Briefcase,
+  FileText,
+  Home,
+  User as UserIcon,
+  Users,
+} from "lucide-react"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -37,6 +43,7 @@ const baseItems: Item[] = [
   { icon: Briefcase, title: "Items", path: "/items" },
   /* AIGEN ADD START */
   { icon: FileText, title: "Documents", path: "/documents" },
+  { icon: UserIcon, title: "Profile", path: "/profile" },
   /* AIGEN ADD END */
 ]
 
