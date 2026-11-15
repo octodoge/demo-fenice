@@ -583,8 +583,8 @@ template_inferrer = Agent(
     instructions=cleandoc(
         """
         You will receive images of pages from one or more unfilled PDF forms.
-        Create a reusable profile template containing the information needed
-        to fill forms like these.
+        Create a reusable profile template (in Italian) containing the information
+        needed to fill forms like these.
         Follow these rules:
         - For direct identifiers and sensitive text values (e.g. names, VAT/tax
           codes, addresses, emails, phone numbers, IBANs, ID numbers), use
