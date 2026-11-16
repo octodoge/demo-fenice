@@ -12,6 +12,7 @@ import { toast } from "sonner"
 
 import { type ProfileBase, type ProfileCreate, ProfileService } from "@/client"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogClose,
@@ -127,10 +128,11 @@ export const Route = createFileRoute("/_layout/profile")({
 function InferTemplateDialog({
   onSuccess,
 }: {
-  onSuccess: (profile: ProfileBase) => void
+  onSuccess: (profile: ProfileBase, demo: boolean) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [files, setFiles] = useState<File[]>([])
+  const [demo, setDemo] = useState(false)
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const onFileReject = useCallback((file: File, message: string) => {
@@ -140,11 +142,15 @@ function InferTemplateDialog({
   }, [])
 
   const inferMutation = useMutation({
-    mutationFn: (files: File[]) =>
-      ProfileService.inferProfileTemplate({ body: { files } }),
-    onSuccess: (res) => {
-      onSuccess(res.data)
+    mutationFn: ({ files, demo }: { files: File[]; demo: boolean }) =>
+      ProfileService.inferProfileTemplate({
+        body: { files },
+        query: { demo },
+      }),
+    onSuccess: (res, variables) => {
+      onSuccess(res.data, variables.demo)
       setFiles([])
+      setDemo(false)
       setIsOpen(false)
       showSuccessToast("Profile template generated")
     },
@@ -158,6 +164,7 @@ function InferTemplateDialog({
     setIsOpen(open)
     if (!open) {
       setFiles([])
+      setDemo(false)
     }
   }
 
@@ -226,6 +233,20 @@ function InferTemplateDialog({
             ))}
           </FileUploadList>
         </FileUpload>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="infer-demo"
+            checked={demo}
+            onCheckedChange={(checked) => setDemo(checked === true)}
+            disabled={inferMutation.isPending}
+          />
+          <Label
+            htmlFor="infer-demo"
+            className="cursor-pointer text-sm font-normal"
+          >
+            Populate with sample data
+          </Label>
+        </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={inferMutation.isPending}>
@@ -235,7 +256,7 @@ function InferTemplateDialog({
           <LoadingButton
             loading={inferMutation.isPending}
             disabled={files.length === 0}
-            onClick={() => inferMutation.mutate(files)}
+            onClick={() => inferMutation.mutate({ files, demo })}
           >
             Generate
           </LoadingButton>
@@ -415,12 +436,13 @@ function ProfileContent() {
         </div>
         <div className="my-4 flex items-center gap-2">
           <InferTemplateDialog
-            onSuccess={(inferred) => {
+            onSuccess={(inferred, demo) => {
               setTemplate(inferred.template)
-              setSensitiveValues((prev) => ({
-                ...inferred.sensitive_data,
-                ...prev,
-              }))
+              setSensitiveValues((prev) =>
+                demo
+                  ? { ...prev, ...inferred.sensitive_data }
+                  : { ...inferred.sensitive_data, ...prev },
+              )
             }}
           />
           <LoadingButton

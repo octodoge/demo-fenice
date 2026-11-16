@@ -9,7 +9,7 @@ from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import Profile, ProfileBase, ProfileCreate, ProfilePublic
-from app.utils import get_profile, infer_template
+from app.utils import get_profile, infer_template, infer_template_demo
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -50,6 +50,7 @@ def replace_profile(
 async def infer_profile_template(
     current_user: CurrentUser,  # noqa: ARG001
     files: list[UploadFile],
+    demo: bool = False,
 ) -> Any:
     """
     Infer a profile template and sensitive data keys from example PDF forms.
@@ -68,7 +69,7 @@ async def infer_profile_template(
             doc = stack.enter_context(pymupdf.open(stream=content, filetype="pdf"))
             docs.append(doc)
 
-        return await infer_template(docs)
+        return await (infer_template_demo(docs) if demo else infer_template(docs))
 
 
 # AIGEN ADD END

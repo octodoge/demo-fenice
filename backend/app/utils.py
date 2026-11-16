@@ -223,7 +223,9 @@ widget_detector = Agent(
         "gemini-3.8-flash",
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
-    model_settings=GoogleModelSettings(thinking="medium"),
+    model_settings=GoogleModelSettings(
+        thinking="low"
+    ),  # low instead of medium solved drift once
     output_type=list[MissingWidget],
     deps_type=DetectorDeps,
     validation_context=lambda ctx: ctx.deps,
@@ -591,8 +593,11 @@ template_inferrer = Agent(
           {snake_case} Python format placeholders.
         - For non-identifying attributes, categories, and facts needed to answer
           choice checkboxes (e.g. legal form, enterprise size, gender, sector,
-          certifications), write clear entries with angle-bracket hints for the
-          user to edit (e.g. "Legal Form: <e.g. S.r.l., S.p.A.>").
+          certifications), list the available options as [ ] checkboxes (or the
+          2 most common choices if open-ended) and always end with "[ ] ..." so
+          the user can mark [x] or write a custom value/condition (e.g.
+          "Forma giuridica:\n[ ] S.r.l.\n[ ] Ditta individuale\n[ ] ...",
+          "Settore di attività:\n[ ] Manifatturiero\n[ ] Commercio e servizi\n[ ] ...").
           Never use curly braces { } for these.
         - Ignore mandatory "must-accept" declarations and consents where the
           applicant has no real choice (e.g. no criminal convictions, not in
@@ -605,7 +610,44 @@ template_inferrer = Agent(
 )
 
 
-async def infer_template(docs: list[pymupdf.Document]) -> ProfileBase:
+template_inferrer_demo = Agent(
+    GoogleModel(
+        "gemini-3.8-flash",
+        provider=GoogleProvider(api_key=ai_studio_api_key),
+    ),
+    model_settings=GoogleModelSettings(thinking="medium"),
+    output_type=ProfileBase,
+    instructions=cleandoc(
+        """
+        You will receive images of pages from one or more unfilled PDF forms.
+        Create a ready-to-use demo profile (in Italian) populated with coherent,
+        realistic fake data suitable for filling forms like these.
+        Return a ProfileBase with:
+        - template:
+          - For direct identifiers and sensitive text values (e.g. names,
+            VAT/tax codes, addresses, emails, phone numbers, IBANs, ID numbers),
+            use {snake_case} Python format placeholders.
+          - For non-identifying attributes, categories, and facts needed to
+            answer choice checkboxes (e.g. legal form, enterprise size, gender,
+            sector, certifications), write concrete, realistic Italian sample
+            values directly (e.g. "Forma giuridica: S.r.l."), without
+            angle-bracket hints or curly braces { }.
+          - Ignore mandatory "must-accept" declarations and consents where the
+            applicant has no real choice (e.g. no criminal convictions, not in
+            bankruptcy/liquidation, no tax arrears, having read the rules,
+            privacy/GDPR consent), as well as form-specific procedural fields
+            (e.g. signature dates, attachment checklists).
+        - sensitive_data:
+          - Provide a coherent, realistic Italian sample value for every
+            {placeholder} used in template (matching keys exactly).
+        """
+    ),
+)
+
+
+def _build_template_prompt_parts(
+    docs: list[pymupdf.Document],
+) -> list[str | BinaryContent]:
     prompt_parts: list[str | BinaryContent] = []
     for doc_idx, doc in enumerate(docs):
         for page_idx, page in enumerate(doc.pages()):
@@ -614,7 +656,11 @@ async def infer_template(docs: list[pymupdf.Document]) -> ProfileBase:
             prompt_parts.append(
                 BinaryContent(data=pix.tobytes("png"), media_type="image/png")
             )
+    return prompt_parts
 
+
+async def infer_template(docs: list[pymupdf.Document]) -> ProfileBase:
+    prompt_parts = _build_template_prompt_parts(docs)
     if not prompt_parts:
         return ProfileBase(template="", sensitive_data={})
 
@@ -626,6 +672,15 @@ async def infer_template(docs: list[pymupdf.Document]) -> ProfileBase:
         if field_name is not None
     }
     return ProfileBase(template=template, sensitive_data=sensitive_data)
+
+
+async def infer_template_demo(docs: list[pymupdf.Document]) -> ProfileBase:
+    prompt_parts = _build_template_prompt_parts(docs)
+    if not prompt_parts:
+        return ProfileBase(template="", sensitive_data={})
+
+    result = await template_inferrer_demo.run(prompt_parts)
+    return result.output
 
 
 # AIGEN ADD END

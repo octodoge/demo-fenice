@@ -1066,7 +1066,12 @@ export type profileReplaceProfileResponse = profileReplaceProfileResponses[keyof
 export type profileInferProfileTemplateData = {
     body: Body_profile_infer_profile_template;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Demo
+         */
+        demo?: boolean;
+    };
     url: '/api/v1/profile/infer-template';
 };
 
