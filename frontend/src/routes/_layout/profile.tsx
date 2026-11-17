@@ -38,14 +38,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 
@@ -487,33 +479,21 @@ function PendingProfile() {
           </LoadingButton>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
-        <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+        <div className="flex flex-col gap-2 lg:col-span-2">
           <Label>Profile Template</Label>
           <Skeleton className="min-h-48 w-full rounded-md" />
         </div>
         <div className="flex flex-col gap-2">
           <Label>Sensitive Data</Label>
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-1/3">Placeholder</TableHead>
-                <TableHead>Value</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {Array.from({ length: 3 }).map((_, index) => (
-                <TableRow key={index}>
-                  <TableCell>
-                    <Skeleton className="h-4 w-32 font-mono" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-9 w-full" />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="divide-y rounded-lg border">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="flex flex-col gap-1.5 p-3">
+                <Skeleton className="h-4 w-32 font-mono" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -671,8 +651,8 @@ function ProfileContent() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="flex flex-col gap-2 lg:col-span-2">
           <Label>Profile Template</Label>
           <div className="min-h-48 max-h-[calc(100vh-16rem)] w-full overflow-y-auto rounded-md border border-input bg-transparent py-2 pr-5 pl-3 shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30">
             {segments.map((segment) => (
@@ -700,52 +680,41 @@ function ProfileContent() {
           <div className="relative flex-1">
             <div
               ref={tableScrollRef}
-              className="max-h-full overflow-y-auto rounded-lg border lg:absolute lg:inset-x-0 lg:top-0 [&_[data-slot=table-container]]:border-0"
+              className="max-h-full overflow-y-auto rounded-lg border lg:absolute lg:inset-x-0 lg:top-0"
             >
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-1/3">Placeholder</TableHead>
-                    <TableHead>Value</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {placeholders.length > 0 ? (
-                    placeholders.map((key) => (
-                      <TableRow key={key}>
-                        <TableCell className="font-mono text-sm font-medium text-primary">
-                          {key}
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            ref={(el) => {
-                              inputRefs.current[key] = el
-                            }}
-                            value={activeSensitiveData[key] ?? ""}
-                            onChange={(e) =>
-                              setSensitiveValues((prev) => ({
-                                ...prev,
-                                [key]: e.target.value,
-                              }))
-                            }
-                            placeholder={`Enter value for {${key}}`}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell
-                        colSpan={2}
-                        className="h-32 text-center text-muted-foreground"
+              {placeholders.length > 0 ? (
+                <div className="divide-y">
+                  {placeholders.map((key) => (
+                    <div key={key} className="flex flex-col gap-1.5 p-3">
+                      <Label
+                        htmlFor={`sensitive-${key}`}
+                        className="font-mono text-sm font-medium text-primary"
                       >
-                        No placeholders in template. Add {"{placeholder}"} tags
-                        in the template to define sensitive data.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                        {key}
+                      </Label>
+                      <Input
+                        id={`sensitive-${key}`}
+                        ref={(el) => {
+                          inputRefs.current[key] = el
+                        }}
+                        value={activeSensitiveData[key] ?? ""}
+                        onChange={(e) =>
+                          setSensitiveValues((prev) => ({
+                            ...prev,
+                            [key]: e.target.value,
+                          }))
+                        }
+                        placeholder={`Enter value for {${key}}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center p-4 text-center text-sm text-muted-foreground">
+                  No placeholders in template. Add {"{placeholder}"} tags in the
+                  template to define sensitive data.
+                </div>
+              )}
             </div>
           </div>
         </div>
