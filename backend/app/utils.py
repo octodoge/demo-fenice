@@ -584,21 +584,30 @@ template_inferrer = Agent(
     output_type=TemplateStr,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more unfilled PDF forms.
+        You will receive images of pages from one or more unfilled PDF forms,
+        optionally preceded by an existing profile template.
         Create a reusable profile template (in Italian) containing the information
-        needed to fill forms like these.
+        needed to fill forms like these, or update the existing one if provided.
         Follow these rules:
+        - If an existing template is provided, integrate any missing information
+          needed for the forms. You may reorganize or refine the structure for
+          clarity and coherence, but preserve existing information, user choices
+          (e.g. [x] selections or custom values), and exact {placeholder} names
+          (avoid creating duplicate or renamed placeholders for the same data).
         - For direct identifiers and sensitive text values (e.g. names, VAT/tax
           codes, addresses, emails, phone numbers, IBANs, ID numbers), use
           {snake_case} Python format placeholders.
         - For non-identifying attributes, categories, and facts needed to answer
           choice checkboxes (e.g. legal form, enterprise size, gender, sector,
-          certifications), list the available options as [ ] checkboxes (or the
-          2 most common choices if open-ended) and always end with "[ ] ..." so
-          the user can mark [x] or write a custom value/condition (e.g.
-          "Forma giuridica:\n[ ] S.r.l.\n[ ] Ditta individuale\n[ ] ...",
-          "Settore di attività:\n[ ] Manifatturiero\n[ ] Commercio e servizi\n[ ] ...").
+          certifications), list the available options as [ ] checkboxes indented
+          by 2 spaces under their label (or the 2 most common choices if
+          open-ended) and always end with "  [ ] ..." so the user can mark [x]
+          or write a custom value/condition (e.g.
+          "Forma giuridica:\n  [ ] S.r.l.\n  [ ] Ditta individuale\n  [ ] ...",
+          "Settore di attività:\n  [ ] Manifatturiero\n  [ ] Commercio e servizi\n  [ ] ...").
           Never use curly braces { } for these.
+        - Use consistent 2-space indentation for nested items and checkbox
+          options.
         - Ignore mandatory "must-accept" declarations and consents where the
           applicant has no real choice (e.g. no criminal convictions, not in
           bankruptcy/liquidation, no tax arrears, having read the rules,
@@ -619,11 +628,19 @@ template_inferrer_demo = Agent(
     output_type=ProfileBase,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more unfilled PDF forms.
+        You will receive images of pages from one or more unfilled PDF forms,
+        optionally preceded by an existing profile template.
         Create a ready-to-use demo profile (in Italian) populated with coherent,
-        realistic fake data suitable for filling forms like these.
+        realistic fake data suitable for filling forms like these, or update and
+        complete the existing template if provided.
         Return a ProfileBase with:
         - template:
+          - If an existing template is provided, integrate any missing
+            information needed for the forms. You may reorganize or refine the
+            structure for clarity and coherence, while preserving existing
+            information, already-selected choices, and exact {placeholder}
+            names. If the existing template contains unfilled [ ] checkbox
+            groups, select a coherent, realistic option by marking it as [x].
           - For direct identifiers and sensitive text values (e.g. names,
             VAT/tax codes, addresses, emails, phone numbers, IBANs, ID numbers),
             use {snake_case} Python format placeholders.
@@ -647,6 +664,7 @@ template_inferrer_demo = Agent(
 
 def _build_template_prompt_parts(
     docs: list[pymupdf.Document],
+    template: str = "",
 ) -> list[str | BinaryContent]:
     prompt_parts: list[str | BinaryContent] = []
     for doc_idx, doc in enumerate(docs):
@@ -656,26 +674,32 @@ def _build_template_prompt_parts(
             prompt_parts.append(
                 BinaryContent(data=pix.tobytes("png"), media_type="image/png")
             )
+    if prompt_parts and template.strip():
+        prompt_parts.insert(0, f"Existing profile template:\n{template}")
     return prompt_parts
 
 
-async def infer_template(docs: list[pymupdf.Document]) -> ProfileBase:
-    prompt_parts = _build_template_prompt_parts(docs)
+async def infer_template(
+    docs: list[pymupdf.Document], template: str = ""
+) -> ProfileBase:
+    prompt_parts = _build_template_prompt_parts(docs, template)
     if not prompt_parts:
         return ProfileBase(template="", sensitive_data={})
 
     result = await template_inferrer.run(prompt_parts)
-    template = result.output
+    inferred_template = result.output
     sensitive_data = {
         field_name: ""
-        for _, field_name, _, _ in Formatter().parse(template)
+        for _, field_name, _, _ in Formatter().parse(inferred_template)
         if field_name is not None
     }
-    return ProfileBase(template=template, sensitive_data=sensitive_data)
+    return ProfileBase(template=inferred_template, sensitive_data=sensitive_data)
 
 
-async def infer_template_demo(docs: list[pymupdf.Document]) -> ProfileBase:
-    prompt_parts = _build_template_prompt_parts(docs)
+async def infer_template_demo(
+    docs: list[pymupdf.Document], template: str = ""
+) -> ProfileBase:
+    prompt_parts = _build_template_prompt_parts(docs, template)
     if not prompt_parts:
         return ProfileBase(template="", sensitive_data={})
 

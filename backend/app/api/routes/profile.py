@@ -1,10 +1,10 @@
 # AIGEN ADD START
 
 from contextlib import ExitStack
-from typing import Any
+from typing import Annotated, Any
 
 import pymupdf
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
@@ -50,6 +50,7 @@ def replace_profile(
 async def infer_profile_template(
     current_user: CurrentUser,  # noqa: ARG001
     files: list[UploadFile],
+    template: Annotated[str, Form()] = "",
     demo: bool = False,
 ) -> Any:
     """
@@ -69,7 +70,11 @@ async def infer_profile_template(
             doc = stack.enter_context(pymupdf.open(stream=content, filetype="pdf"))
             docs.append(doc)
 
-        return await (infer_template_demo(docs) if demo else infer_template(docs))
+        return await (
+            infer_template_demo(docs, template)
+            if demo
+            else infer_template(docs, template)
+        )
 
 
 # AIGEN ADD END

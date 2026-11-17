@@ -44,6 +44,7 @@ const baseItems: Item[] = [
   /* AIGEN ADD START */
   { icon: FileText, title: "Documents", path: "/documents" },
   { icon: UserIcon, title: "Profile", path: "/profile" },
+  { icon: UserIcon, title: "Profile2", path: "/profile2" },
   /* AIGEN ADD END */
 ]
 

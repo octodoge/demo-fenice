@@ -52,6 +52,10 @@ export type Body_profile_infer_profile_template = {
      * Files
      */
     files: Array<Blob | File>;
+    /**
+     * Template
+     */
+    template?: string;
 };
 
 /**
