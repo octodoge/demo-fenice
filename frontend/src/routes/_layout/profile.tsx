@@ -8,14 +8,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { diffLines } from "diff"
 import { Check, Pencil, Save, Sparkles, Upload, X } from "lucide-react"
-import {
-  Fragment,
-  Suspense,
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { Suspense, useCallback, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { type ProfileBase, type ProfileCreate, ProfileService } from "@/client"
@@ -58,118 +51,68 @@ import { handleError } from "@/utils"
 
 const PLACEHOLDER_TOKEN_REGEX = /(\{\{|\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\})/g
 
-type DiffRange = {
-  start: number
-  end: number
-  type: "added" | "removed"
+type Segment = {
+  id: number
+  text: string
+  type: "normal" | "added" | "removed"
 }
 
-function splitRangeByParagraphs(range: DiffRange, text: string): DiffRange[] {
-  let { start, end } = range
-  while (start < end && text[start] === "\n") start++
-  while (end > start + 1 && text[end - 1] === "\n" && text[end - 2] === "\n") {
-    end--
+function mergeAdjacentNormals(segments: Segment[]): Segment[] {
+  const merged: Segment[] = []
+  for (const seg of segments) {
+    const prev = merged[merged.length - 1]
+    if (prev && prev.type === "normal" && seg.type === "normal") {
+      prev.text = `${prev.text}\n${seg.text}`
+    } else {
+      merged.push({ ...seg })
+    }
   }
-  if (end <= start) return []
+  return merged.length > 0 ? merged : [{ id: 0, text: "", type: "normal" }]
+}
 
-  const slice = text.slice(start, end)
-  const parts: DiffRange[] = []
-  let cursor = 0
+function buildSegmentsFromDiff(
+  oldTemplate: string,
+  newTemplate: string,
+): Segment[] {
+  const changes = diffLines(oldTemplate, newTemplate)
+  const rawSegments: Segment[] = []
+  let nextId = 1
 
-  for (const match of slice.matchAll(/\n\n+/g)) {
-    const before = slice.slice(cursor, match.index + 1)
-    const after = slice.slice(match.index + match[0].length)
-    if (before.trim().length > 0 && after.trim().length > 0) {
-      parts.push({
-        start: start + cursor,
-        end: start + match.index + 1,
-        type: range.type,
+  for (const part of changes) {
+    if (!part.value) continue
+    const text = part.value.endsWith("\n")
+      ? part.value.slice(0, -1)
+      : part.value
+
+    if (!part.added && !part.removed) {
+      rawSegments.push({ id: nextId++, text, type: "normal" })
+      continue
+    }
+
+    const diffType = part.added ? "added" : "removed"
+    let cursor = 0
+    for (const match of text.matchAll(/\n(\n+)/g)) {
+      const before = text.slice(cursor, match.index)
+      if (before.trim().length > 0) {
+        rawSegments.push({ id: nextId++, text: before, type: diffType })
+      }
+      rawSegments.push({
+        id: nextId++,
+        text: match[1].slice(1),
+        type: "normal",
       })
       cursor = match.index + match[0].length
     }
+
+    const tail = text.slice(cursor)
+    if (tail.trim().length > 0) {
+      rawSegments.push({ id: nextId++, text: tail, type: diffType })
+    } else if (cursor === 0) {
+      rawSegments.push({ id: nextId++, text: tail, type: "normal" })
+    }
   }
 
-  if (cursor < slice.length && slice.slice(cursor).trim().length > 0) {
-    parts.push({
-      start: start + cursor,
-      end,
-      type: range.type,
-    })
-  }
-
-  return parts
-}
-
-function buildTemplateDiff(
-  oldTemplate: string,
-  newTemplate: string,
-): { template: string; ranges: DiffRange[] } {
-  const changes = diffLines(oldTemplate, newTemplate)
-  let merged = ""
-  const rawRanges: DiffRange[] = []
-
-  changes.forEach((part, index) => {
-    if (!part.value) return
-    const isLast = index === changes.length - 1
-    const value =
-      !isLast && !part.value.endsWith("\n") ? `${part.value}\n` : part.value
-    const start = merged.length
-    merged += value
-    const end = merged.length
-    if (part.added) {
-      rawRanges.push({ start, end, type: "added" })
-    } else if (part.removed) {
-      rawRanges.push({ start, end, type: "removed" })
-    }
-  })
-
-  const ranges = rawRanges.flatMap((r) => splitRangeByParagraphs(r, merged))
-  return { template: merged, ranges }
-}
-
-function adjustRangesForEdit(
-  ranges: DiffRange[],
-  prev: string,
-  next: string,
-  selectionStart: number,
-): DiffRange[] {
-  const delta = next.length - prev.length
-  const maxEditStart = Math.min(
-    prev.length,
-    next.length,
-    Math.max(0, selectionStart - Math.max(0, delta)),
-  )
-  let editStart = 0
-  while (editStart < maxEditStart && prev[editStart] === next[editStart]) {
-    editStart++
-  }
-  let suffix = 0
-  while (
-    suffix < prev.length - editStart &&
-    suffix < next.length - editStart &&
-    prev[prev.length - 1 - suffix] === next[next.length - 1 - suffix]
-  ) {
-    suffix++
-  }
-  const editEnd = prev.length - suffix
-
-  return ranges.flatMap((r) => {
-    if (
-      r.end < editStart ||
-      (r.end === editStart && prev[r.end - 1] === "\n")
-    ) {
-      return [r]
-    }
-    if (r.start > editEnd) {
-      return [{ ...r, start: r.start + delta, end: r.end + delta }]
-    }
-    if (r.start <= editStart && editEnd <= r.end) {
-      return r.end + delta > r.start ? [{ ...r, end: r.end + delta }] : []
-    }
-    const start = r.start < editStart ? r.start : editEnd + delta
-    const end = r.end > editEnd ? r.end + delta : editStart
-    return end > start ? [{ ...r, start, end }] : []
-  })
+  return mergeAdjacentNormals(rawSegments)
 }
 
 function getProfileQueryOptions() {
@@ -190,216 +133,183 @@ function extractPlaceholders(template: string): string[] {
   return Array.from(keys).sort()
 }
 
-function renderHighlightedTemplate(
-  template: string,
-  diffRanges: DiffRange[],
-  hoveredPlaceholderIndex: number | null,
-  onPlaceholderHoverChange: (index: number | null) => void,
+function renderPlaceholders(
+  text: string,
+  hoveredIndex: number | null,
+  onHoverChange: (index: number | null) => void,
   onFocusPlaceholder: (key: string) => void,
-  hoveredDiffIndex: number | null,
-  onDiffHoverChange: (index: number | null) => void,
-  onKeepDiff: (index: number) => void,
-  onRemoveDiff: (index: number) => void,
 ) {
-  let placeholderCounter = 0
-
-  const renderPlaceholders = (segmentText: string) =>
-    segmentText.split(PLACEHOLDER_TOKEN_REGEX).map((part, index) => {
-      if (
-        part.startsWith("{") &&
-        part.endsWith("}") &&
-        part !== "{{" &&
-        part !== "}}"
-      ) {
-        const currentIndex = placeholderCounter++
-        const key = part.slice(1, -1)
-        return (
-          <span
-            key={index}
-            data-placeholder-index={currentIndex}
-            className="relative rounded-xs bg-primary/15 text-primary"
-          >
-            {hoveredPlaceholderIndex === currentIndex && (
-              <button
-                type="button"
-                title={`Fill {${key}}`}
-                onMouseLeave={() => onPlaceholderHoverChange(null)}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onFocusPlaceholder(key)
-                }}
-                className="pointer-events-auto absolute top-1/2 left-full z-20 ml-0.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xs transition-transform hover:scale-110"
-              >
-                <Pencil className="size-2.5" />
-              </button>
-            )}
-            {part}
-          </span>
-        )
-      }
-      return part
-    })
-
-  if (diffRanges.length === 0) {
-    return (
-      <>
-        {renderPlaceholders(template)}
-        {template.endsWith("\n") ? "\n " : null}
-      </>
-    )
-  }
-
-  const nodes: React.ReactNode[] = []
-  let cursor = 0
-  let lastWasBlock = false
-
-  diffRanges.forEach((range, diffIndex) => {
-    const isLineStart = range.start === 0 || template[range.start - 1] === "\n"
-    const isLineEnd =
-      range.end === template.length || template[range.end - 1] === "\n"
-    const isBlock = isLineStart && isLineEnd
-
-    if (range.start > cursor) {
-      const normalSlice = template.slice(cursor, range.start)
-      const trimmedNormal =
-        isBlock && normalSlice.endsWith("\n")
-          ? normalSlice.slice(0, -1)
-          : normalSlice
-      nodes.push(
-        <Fragment key={`normal-${cursor}`}>
-          {renderPlaceholders(trimmedNormal)}
-          {isBlock && (trimmedNormal === "" || trimmedNormal.endsWith("\n"))
-            ? " "
-            : null}
-        </Fragment>,
+  return text.split(PLACEHOLDER_TOKEN_REGEX).map((part, index) => {
+    if (
+      part.startsWith("{") &&
+      part.endsWith("}") &&
+      part !== "{{" &&
+      part !== "}}"
+    ) {
+      const key = part.slice(1, -1)
+      return (
+        <span
+          key={index}
+          data-placeholder-index={index}
+          className="relative rounded-xs bg-primary/15 text-primary"
+        >
+          {hoveredIndex === index && (
+            <button
+              type="button"
+              title={`Fill {${key}}`}
+              onMouseLeave={() => onHoverChange(null)}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                onFocusPlaceholder(key)
+              }}
+              className="pointer-events-auto absolute top-1/2 left-full z-20 ml-0.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xs transition-transform hover:scale-110"
+            >
+              <Pencil className="size-2.5" />
+            </button>
+          )}
+          {part}
+        </span>
       )
     }
-
-    const rangeText = template.slice(range.start, range.end)
-    const isAdded = range.type === "added"
-    const actionsNode = hoveredDiffIndex === diffIndex && (
-      <span
-        data-diff-actions
-        className={`pointer-events-auto absolute top-0.5 right-0.5 z-30 flex items-center gap-0.5 ${isAdded ? "" : "flex-row-reverse"}`}
-      >
-        <button
-          type="button"
-          title="Keep block"
-          onMouseLeave={(e) => {
-            if (
-              !(
-                e.relatedTarget instanceof HTMLElement &&
-                e.relatedTarget.closest("[data-diff-actions]")
-              )
-            ) {
-              onDiffHoverChange(null)
-            }
-          }}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            onKeepDiff(diffIndex)
-          }}
-          className="flex size-4 cursor-pointer items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs transition-transform hover:scale-110"
-        >
-          <Check className="size-2.5" />
-        </button>
-        <button
-          type="button"
-          title="Remove block"
-          onMouseLeave={(e) => {
-            if (
-              !(
-                e.relatedTarget instanceof HTMLElement &&
-                e.relatedTarget.closest("[data-diff-actions]")
-              )
-            ) {
-              onDiffHoverChange(null)
-            }
-          }}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemoveDiff(diffIndex)
-          }}
-          className="flex size-4 cursor-pointer items-center justify-center rounded-full bg-destructive text-white shadow-xs transition-transform hover:scale-110"
-        >
-          <X className="size-2.5" />
-        </button>
-      </span>
-    )
-
-    if (isBlock) {
-      const inner = rangeText.endsWith("\n")
-        ? rangeText.slice(0, -1)
-        : rangeText
-      nodes.push(
-        <div
-          key={`diff-${diffIndex}`}
-          data-diff-index={diffIndex}
-          className={
-            isAdded
-              ? "relative rounded-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-              : "relative rounded-xs bg-destructive/15 text-destructive"
-          }
-        >
-          {actionsNode}
-          {renderPlaceholders(inner)}
-          {inner === "" || inner.endsWith("\n") ? " " : null}
-        </div>,
-      )
-    } else {
-      const hasTrailingNewline =
-        rangeText.length > 1 && rangeText.endsWith("\n")
-      const visibleText = hasTrailingNewline
-        ? rangeText.slice(0, -1)
-        : rangeText
-      nodes.push(
-        <Fragment key={`diff-${diffIndex}`}>
-          <span
-            data-diff-index={diffIndex}
-            className={
-              isAdded
-                ? "relative rounded-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                : "relative rounded-xs bg-destructive/15 text-destructive"
-            }
-          >
-            {actionsNode}
-            {renderPlaceholders(visibleText)}
-          </span>
-          {hasTrailingNewline ? "\n" : null}
-        </Fragment>,
-      )
-    }
-
-    cursor = range.end
-    lastWasBlock = isBlock
+    return part
   })
+}
 
-  if (cursor < template.length) {
-    nodes.push(
-      <Fragment key={`normal-${cursor}`}>
-        {renderPlaceholders(template.slice(cursor))}
-      </Fragment>,
+function SegmentEditor({
+  segment,
+  isOnlyNormal,
+  onChange,
+  onKeep,
+  onRemove,
+  onFocusPlaceholder,
+}: {
+  segment: Segment
+  isOnlyNormal: boolean
+  onChange: (text: string) => void
+  onKeep: () => void
+  onRemove: () => void
+  onFocusPlaceholder: (key: string) => void
+}) {
+  const [hoveredPlaceholderIndex, setHoveredPlaceholderIndex] = useState<
+    number | null
+  >(null)
+  const highlightLayerRef = useRef<HTMLDivElement | null>(null)
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const layer = highlightLayerRef.current
+    if (!layer) return
+    const spans = layer.querySelectorAll<HTMLElement>(
+      "[data-placeholder-index]",
     )
-    lastWasBlock = false
+    for (const span of spans) {
+      for (const rect of span.getClientRects()) {
+        if (
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right + 20 &&
+          e.clientY >= rect.top - 2 &&
+          e.clientY <= rect.bottom + 2
+        ) {
+          setHoveredPlaceholderIndex(Number(span.dataset.placeholderIndex))
+          return
+        }
+      }
+    }
+    setHoveredPlaceholderIndex(null)
   }
 
-  if (template.endsWith("\n")) {
-    nodes.push(lastWasBlock ? " " : "\n ")
-  }
+  const isDiff = segment.type !== "normal"
+  const isAdded = segment.type === "added"
 
-  return nodes
+  return (
+    <div
+      className={
+        isDiff
+          ? isAdded
+            ? "group relative rounded-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+            : "group relative rounded-xs bg-destructive/15 text-destructive"
+          : "relative"
+      }
+    >
+      {isDiff && (
+        <span
+          className={`pointer-events-auto absolute top-0.5 right-0.5 z-30 hidden items-center gap-0.5 group-hover:flex ${isAdded ? "" : "flex-row-reverse"}`}
+        >
+          <button
+            type="button"
+            title="Keep block"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onKeep()
+            }}
+            className="flex size-4 cursor-pointer items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs transition-transform hover:scale-110"
+          >
+            <Check className="size-2.5" />
+          </button>
+          <button
+            type="button"
+            title="Remove block"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemove()
+            }}
+            className="flex size-4 cursor-pointer items-center justify-center rounded-full bg-destructive text-white shadow-xs transition-transform hover:scale-110"
+          >
+            <X className="size-2.5" />
+          </button>
+        </span>
+      )}
+      <div className="grid w-full">
+        <div
+          ref={highlightLayerRef}
+          aria-hidden="true"
+          className="pointer-events-none relative z-10 col-start-1 row-start-1 w-full font-mono text-sm leading-relaxed whitespace-pre-wrap break-words"
+        >
+          {renderPlaceholders(
+            segment.text,
+            hoveredPlaceholderIndex,
+            setHoveredPlaceholderIndex,
+            onFocusPlaceholder,
+          )}
+          {segment.text === "" || segment.text.endsWith("\n") ? " " : null}
+        </div>
+        <textarea
+          rows={1}
+          value={segment.text}
+          onChange={(e) => onChange(e.target.value)}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={(e) => {
+            if (
+              !(
+                e.relatedTarget instanceof HTMLElement &&
+                e.relatedTarget.closest("button")
+              )
+            ) {
+              setHoveredPlaceholderIndex(null)
+            }
+          }}
+          placeholder={
+            isOnlyNormal
+              ? "Enter your profile template using {placeholder} for sensitive data..."
+              : undefined
+          }
+          spellCheck={false}
+          className={`col-start-1 row-start-1 h-full w-full resize-none overflow-hidden bg-transparent font-mono text-sm leading-relaxed whitespace-pre-wrap break-words text-transparent caret-foreground selection:bg-primary/25 selection:text-transparent placeholder:text-muted-foreground focus:outline-none ${isOnlyNormal ? "min-h-44" : ""}`}
+        />
+      </div>
+    </div>
+  )
 }
 
 export const Route = createFileRoute("/_layout/profile")({
@@ -615,18 +525,24 @@ function ProfileContent() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { data: profile } = useSuspenseQuery(getProfileQueryOptions())
 
-  const [template, setTemplate] = useState(profile.template)
-  const [diffRanges, setDiffRanges] = useState<DiffRange[]>([])
+  const [segments, setSegments] = useState<Segment[]>(() => [
+    { id: 0, text: profile.template, type: "normal" },
+  ])
   const [sensitiveValues, setSensitiveValues] = useState<
     Record<string, string>
   >(() => profile.sensitive_data ?? {})
-  const [hoveredPlaceholderIndex, setHoveredPlaceholderIndex] = useState<
-    number | null
-  >(null)
-  const [hoveredDiffIndex, setHoveredDiffIndex] = useState<number | null>(null)
-  const highlightLayerRef = useRef<HTMLDivElement | null>(null)
   const tableScrollRef = useRef<HTMLDivElement | null>(null)
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  const template = useMemo(
+    () => segments.map((s) => s.text).join("\n"),
+    [segments],
+  )
+
+  const hasUnresolvedDiffs = useMemo(
+    () => segments.some((s) => s.type !== "normal"),
+    [segments],
+  )
 
   const handleFocusPlaceholder = useCallback((key: string) => {
     const input = inputRefs.current[key]
@@ -647,115 +563,37 @@ function ProfileContent() {
     }
   }, [])
 
-  const handleKeepDiff = useCallback((index: number) => {
-    setDiffRanges((prev) => prev.filter((_, i) => i !== index))
-    setHoveredDiffIndex(null)
+  const handleKeepSegment = useCallback((id: number) => {
+    setSegments((prev) =>
+      mergeAdjacentNormals(
+        prev.map((s) => (s.id === id ? { ...s, type: "normal" } : s)),
+      ),
+    )
   }, [])
 
-  const handleRemoveDiff = useCallback(
-    (index: number) => {
-      const range = diffRanges[index]
-      if (!range) {
-        return
-      }
-      let removeStart = range.start
-      let removeEnd = range.end
-      const nextRange = diffRanges[index + 1]
-      const prevRange = diffRanges[index - 1]
+  const handleRemoveSegment = useCallback((id: number) => {
+    setSegments((prev) => {
+      const idx = prev.findIndex((s) => s.id === id)
+      if (idx === -1) return prev
+      const next = [...prev]
       if (
-        template[removeEnd] === "\n" &&
-        (!nextRange || nextRange.start > removeEnd)
+        idx + 1 < next.length &&
+        next[idx + 1].type === "normal" &&
+        next[idx + 1].text === ""
       ) {
-        removeEnd += 1
+        next.splice(idx, 2)
       } else if (
-        removeStart >= 2 &&
-        template[removeStart - 1] === "\n" &&
-        template[removeStart - 2] === "\n" &&
-        (!prevRange || prevRange.end <= removeStart - 1)
+        idx > 0 &&
+        next[idx - 1].type === "normal" &&
+        next[idx - 1].text === ""
       ) {
-        removeStart -= 1
+        next.splice(idx - 1, 2)
+      } else {
+        next.splice(idx, 1)
       }
-      const nextTemplate =
-        template.slice(0, removeStart) + template.slice(removeEnd)
-      const delta = removeEnd - removeStart
-      setTemplate(nextTemplate)
-      setDiffRanges((prev) =>
-        prev
-          .filter((_, i) => i !== index)
-          .map((r) =>
-            r.start >= removeEnd
-              ? { ...r, start: r.start - delta, end: r.end - delta }
-              : r,
-          ),
-      )
-      setHoveredDiffIndex(null)
-    },
-    [diffRanges, template],
-  )
-
-  const handleTemplateMouseMove = (
-    e: React.MouseEvent<HTMLTextAreaElement>,
-  ) => {
-    const layer = highlightLayerRef.current
-    if (!layer) {
-      return
-    }
-    let nextPlaceholderIndex: number | null = null
-    const placeholderSpans = layer.querySelectorAll<HTMLElement>(
-      "[data-placeholder-index]",
-    )
-    for (const span of placeholderSpans) {
-      for (const rect of span.getClientRects()) {
-        if (
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right + 20 &&
-          e.clientY >= rect.top - 2 &&
-          e.clientY <= rect.bottom + 2
-        ) {
-          nextPlaceholderIndex = Number(span.dataset.placeholderIndex)
-          break
-        }
-      }
-      if (nextPlaceholderIndex !== null) {
-        break
-      }
-    }
-    setHoveredPlaceholderIndex(nextPlaceholderIndex)
-
-    let nextDiffIndex: number | null = null
-    const diffSpans = layer.querySelectorAll<HTMLElement>("[data-diff-index]")
-    for (const span of diffSpans) {
-      for (const rect of span.getClientRects()) {
-        if (
-          e.clientX >= rect.left - 12 &&
-          e.clientX <= rect.right &&
-          e.clientY >= rect.top - 2 &&
-          e.clientY <= rect.bottom + 2
-        ) {
-          nextDiffIndex = Number(span.dataset.diffIndex)
-          break
-        }
-      }
-      if (nextDiffIndex !== null) {
-        break
-      }
-    }
-    if (nextDiffIndex === null) {
-      for (const span of diffSpans) {
-        const rect = span.getBoundingClientRect()
-        if (
-          rect.height > 0 &&
-          e.clientX >= rect.left - 12 &&
-          e.clientY >= rect.top - 2 &&
-          e.clientY <= rect.bottom + 2
-        ) {
-          nextDiffIndex = Number(span.dataset.diffIndex)
-          break
-        }
-      }
-    }
-    setHoveredDiffIndex(nextDiffIndex)
-  }
+      return mergeAdjacentNormals(next)
+    })
+  }, [])
 
   const placeholders = useMemo(() => extractPlaceholders(template), [template])
 
@@ -787,8 +625,7 @@ function ProfileContent() {
       ProfileService.replaceProfile({ body: data }),
     onSuccess: (res) => {
       queryClient.setQueryData(["profile"], res.data)
-      setTemplate(res.data.template)
-      setDiffRanges([])
+      setSegments([{ id: 0, text: res.data.template, type: "normal" }])
       setSensitiveValues(res.data.sensitive_data ?? {})
       showSuccessToast("Profile saved successfully")
     },
@@ -815,11 +652,7 @@ function ProfileContent() {
           <InferTemplateDialog
             template={template}
             onSuccess={(inferred, demo) => {
-              const diff = buildTemplateDiff(template, inferred.template)
-              setTemplate(diff.template)
-              setDiffRanges(diff.ranges)
-              setHoveredPlaceholderIndex(null)
-              setHoveredDiffIndex(null)
+              setSegments(buildSegmentsFromDiff(template, inferred.template))
               setSensitiveValues((prev) =>
                 demo
                   ? { ...prev, ...inferred.sensitive_data }
@@ -829,7 +662,7 @@ function ProfileContent() {
           />
           <LoadingButton
             loading={mutation.isPending}
-            disabled={!isDirty || diffRanges.length > 0}
+            disabled={!isDirty || hasUnresolvedDiffs}
             onClick={handleSave}
           >
             <Save className="mr-2" />
@@ -840,61 +673,25 @@ function ProfileContent() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="profile-template">Profile Template</Label>
-          <div className="min-h-48 max-h-[calc(100vh-16rem)] w-full overflow-y-auto rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30">
-            <div className="grid min-h-full w-full">
-              <div
-                ref={highlightLayerRef}
-                aria-hidden="true"
-                className="pointer-events-none relative z-10 col-start-1 row-start-1 w-full py-2 pr-5 pl-3 font-mono text-sm leading-relaxed whitespace-pre-wrap break-words"
-              >
-                {renderHighlightedTemplate(
-                  template,
-                  diffRanges,
-                  hoveredPlaceholderIndex,
-                  setHoveredPlaceholderIndex,
-                  handleFocusPlaceholder,
-                  hoveredDiffIndex,
-                  setHoveredDiffIndex,
-                  handleKeepDiff,
-                  handleRemoveDiff,
-                )}
-              </div>
-              <textarea
-                id="profile-template"
-                value={template}
-                onChange={(e) => {
-                  const next = e.target.value
-                  const selectionStart = e.target.selectionStart
-                  setDiffRanges((prev) =>
-                    prev.length > 0
-                      ? adjustRangesForEdit(
-                          prev,
-                          template,
-                          next,
-                          selectionStart,
-                        )
-                      : prev,
+          <Label>Profile Template</Label>
+          <div className="min-h-48 max-h-[calc(100vh-16rem)] w-full overflow-y-auto rounded-md border border-input bg-transparent py-2 pr-5 pl-3 shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30">
+            {segments.map((segment) => (
+              <SegmentEditor
+                key={segment.id}
+                segment={segment}
+                isOnlyNormal={segments.length === 1}
+                onChange={(nextText) =>
+                  setSegments((prev) =>
+                    prev.map((s) =>
+                      s.id === segment.id ? { ...s, text: nextText } : s,
+                    ),
                   )
-                  setTemplate(next)
-                }}
-                onMouseMove={handleTemplateMouseMove}
-                onMouseLeave={(e) => {
-                  if (
-                    !(
-                      e.relatedTarget instanceof HTMLElement &&
-                      e.relatedTarget.closest("button, [data-diff-actions]")
-                    )
-                  ) {
-                    setHoveredPlaceholderIndex(null)
-                    setHoveredDiffIndex(null)
-                  }
-                }}
-                placeholder="Enter your profile template using {placeholder} for sensitive data..."
-                spellCheck={false}
-                className="col-start-1 row-start-1 h-full w-full resize-none overflow-hidden bg-transparent py-2 pr-5 pl-3 font-mono text-sm leading-relaxed whitespace-pre-wrap break-words text-transparent caret-foreground selection:bg-primary/25 selection:text-transparent placeholder:text-muted-foreground focus:outline-none"
+                }
+                onKeep={() => handleKeepSegment(segment.id)}
+                onRemove={() => handleRemoveSegment(segment.id)}
+                onFocusPlaceholder={handleFocusPlaceholder}
               />
-            </div>
+            ))}
           </div>
         </div>
 
