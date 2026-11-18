@@ -1,0 +1,169 @@
+DATI DEL DICHIARANTE
+- Nome: {dichiarante_nome}
+- Codice fiscale: {dichiarante_cf}
+- Data di nascita: {dichiarante_nascita_data}
+- Luogo di nascita: {dichiarante_nascita_luogo}
+- Provincia di nascita: {dichiarante_nascita_prov}
+- Residenza:
+  - Indirizzo: {dichiarante_residenza_indirizzo}
+  - Numero civico: {dichiarante_residenza_civico}
+  - Comune: {dichiarante_residenza_comune}
+  - Provincia: {dichiarante_residenza_provincia}
+  - CAP: {dichiarante_residenza_cap}
+- In qualità di: Legale rappresentante
+
+DATI DELL'IMPRESA / SOGGETTO PROPONENTE
+- Ragione sociale / Denominazione: {impresa_ragione_sociale}
+- Forma giuridica: S.r.l.
+- Codice fiscale: {impresa_cf}
+- Partita IVA: {impresa_piva}
+- Sede legale:
+  - Indirizzo: {impresa_sede_indirizzo}
+  - Numero civico: {impresa_sede_civico}
+  - Comune: {impresa_sede_comune}
+  - Provincia: {impresa_sede_provincia}
+  - CAP: {impresa_sede_cap}
+- Sede operativa:
+  - Indirizzo: {impresa_sede_operativa_indirizzo}
+  - Numero civico: {impresa_sede_operativa_civico}
+  - Comune: {impresa_sede_operativa_comune}
+  - Provincia: {impresa_sede_operativa_provincia}
+  - CAP: {impresa_sede_operativa_cap}
+- Contatti:
+  - Telefono: {impresa_telefono}
+  - Fax: {impresa_fax}
+  - PEC: {impresa_pec}
+  - E-mail: {impresa_email}
+- Iscrizione Registro Imprese:
+  - Camera di Commercio di: {impresa_registro_imprese_provincia}
+  - Numero iscrizione: {impresa_registro_imprese_numero}
+  - Data iscrizione: {impresa_iscrizione_data}
+  - Attività per cui è iscritta: {impresa_attivita_iscrizione}
+- Durata della ditta / data termine: {impresa_data_termine}
+- Sedi secondarie: {impresa_sedi_secondarie}
+- Settore / Codice ATECO: {impresa_codice_ateco}
+- Dimensione aziendale: Micro impresa
+- Qualifica PMI: Micro, piccola o media impresa
+- Numero dipendenti occupati: {impresa_numero_dipendenti}
+- CCNL applicato ai dipendenti: {ccnl_applicato}
+- Codice CCNL: {ccnl_codice}
+
+SEDE AGENZIA DELLE ENTRATE COMPETENTE
+- Ufficio locale: {agenzia_entrate_ufficio}
+- Indirizzo: {agenzia_entrate_indirizzo}
+- Telefono: {agenzia_entrate_telefono}
+- PEC: {agenzia_entrate_pec}
+- E-mail: {agenzia_entrate_email}
+- Fax: {agenzia_entrate_fax}
+
+POSIZIONI ASSICURATIVE E PREVIDENZIALI
+- INAIL:
+  - Codice identificativo: {inail_codice}
+  - Posizioni assicurative territoriali (P.A.T.): {inail_pat}
+  - Sede competente: {inail_sede}
+- INPS:
+  - Codice identificativo / Matricola: {inps_codice}
+  - Codice Impresa: {inps_codice_impresa}
+  - Sede competente: {inps_sede}
+- Altra cassa previdenziale:
+  - Cassa di appartenenza: {cassa_previdenziale_nome}
+  - Codice identificativo: {cassa_previdenziale_codice}
+  - Indirizzo: {cassa_previdenziale_indirizzo}
+
+DISCIPLINA DISABILI (LEGGE 68/1999)
+- Condizione: Non soggetto agli obblighi di assunzione obbligatoria
+- Ufficio competente per gli adempimenti:
+  - Denominazione: {disabili_ufficio_nome}
+  - Comune: {disabili_ufficio_comune}
+  - Indirizzo: {disabili_ufficio_indirizzo}
+  - Numero civico: {disabili_ufficio_civico}
+  - Telefono: {disabili_ufficio_telefono}
+  - Fax: {disabili_ufficio_fax}
+  - E-mail / PEC: {disabili_ufficio_email}
+- Legge di riferimento (se Stato estero): {disabili_legge_stato_estero}
+- Motivi di esenzione (se non soggetto): {disabili_motivi_esenzione}
+- Stato estero privo di normativa: {disabili_stato_estero}
+
+SOGGETTI CON CARICHE SOCIETARIE (ART. 94 D.LGS. 36/2023)
+- Soggetto 1:
+  - Cognome: {dichiarante_cognome}
+  - Nome: {dichiarante_nome}
+  - Qualifica / carica sociale: Amministratore Unico e Legale Rappresentante
+  - Durata carica: A tempo indeterminato
+  - Codice fiscale: {dichiarante_cf}
+  - Data di nascita: {dichiarante_nascita_data}
+  - Luogo di nascita: {dichiarante_nascita_luogo}
+  - Provincia di nascita: {dichiarante_nascita_prov}
+  - Comune di residenza: {dichiarante_residenza_comune}
+
+TRACCIABILITÀ DEI FLUSSI FINANZIARI (LEGGE 136/2010)
+- Tipologia conto: Conto corrente bancario
+- Istituto bancario: {banca_nome}
+- Filiale / Agenzia: {banca_agenzia}
+- Agenzia n.: {banca_agenzia_numero}
+- Comune agenzia: {banca_citta}
+- Intestatario: {banca_intestatario}
+- Codice IBAN: {banca_iban}
+- Codice SWIFT / BIC: {banca_bic}
+- Numero C/C: {banca_cc_numero}
+- Codice paese: {banca_codice_paese}
+- CIN EUR: {banca_cin_eur}
+- CIN: {banca_cin_nazionale}
+- ABI: {banca_abi}
+- CAB: {banca_cab}
+- Persone delegate ad operare sul conto:
+  - Delegato 1:
+    - Cognome: {delegato1_cognome}
+    - Nome: {delegato1_nome}
+    - Codice fiscale: {delegato1_cf}
+    - Data di nascita: {delegato1_nascita_data}
+    - Luogo di nascita: {delegato1_nascita_luogo}
+    - Provincia di nascita: {delegato1_nascita_provincia}
+    - Residenza:
+      - Indirizzo: {delegato1_residenza_indirizzo}
+      - Numero civico: {delegato1_residenza_civico}
+      - Comune: {delegato1_residenza_comune}
+      - Provincia: {delegato1_residenza_provincia}
+      - CAP: {delegato1_residenza_cap}
+  - Delegato 2:
+    - Cognome: {delegato2_cognome}
+    - Nome: {delegato2_nome}
+    - Codice fiscale: {delegato2_cf}
+    - Data di nascita: {delegato2_nascita_data}
+    - Luogo di nascita: {delegato2_nascita_luogo}
+    - Provincia di nascita: {delegato2_nascita_provincia}
+    - Residenza:
+      - Indirizzo: {delegato2_residenza_indirizzo}
+      - Numero civico: {delegato2_residenza_civico}
+      - Comune: {delegato2_residenza_comune}
+      - Provincia: {delegato2_residenza_provincia}
+      - CAP: {delegato2_residenza_cap}
+  - Delegato 3:
+    - Cognome: {delegato3_cognome}
+    - Nome: {delegato3_nome}
+    - Codice fiscale: {delegato3_cf}
+    - Data di nascita: {delegato3_nascita_data}
+    - Luogo di nascita: {delegato3_nascita_luogo}
+    - Provincia di nascita: {delegato3_nascita_provincia}
+    - Residenza:
+      - Indirizzo: {delegato3_residenza_indirizzo}
+      - Numero civico: {delegato3_residenza_civico}
+      - Comune: {delegato3_residenza_comune}
+      - Provincia: {delegato3_residenza_provincia}
+      - CAP: {delegato3_residenza_cap}
+
+ALTRE DICHIARAZIONI
+- Reati ex artt. 317 e 629 c.p. (concussione ed estorsione): Non è stato vittima
+- Situazione di controllo (art. 2359 c.c.): Non si trova in alcuna situazione di controllo o relazione
+- Diritti reali di godimento o di garanzia sulle quote societarie: Non esistono diritti reali di godimento o di garanzia
+- Soggetti muniti di procura irrevocabile che hanno votato nell'ultimo anno: Nessun soggetto
+- Piani individuali di emersione del lavoro sommerso (L. 383/2001): Non si è avvalsa di piani individuali di emersione
+- Registro o banca dati ufficiale per dati identificativi dei soggetti ex art. 94 D.Lgs. 36/2023: Registro delle Imprese della Camera di Commercio di {impresa_registro_imprese_provincia}
+- Cause di esclusione ex artt. 94 e 95 D.Lgs. 36/2023: Non sussistono cause di esclusione a carico dell'operatore economico né dei soggetti con cariche
+- Violazioni tributarie o previdenziali non definitivamente accertate (art. 95 co. 2 D.Lgs. 36/2023): Non ha commesso violazioni
+- Pantouflage / revolving door (art. 53 co. 16-ter D.Lgs. 165/2001): Non si trova nella condizione di divieto
+- Subappalto (art. 119 D.Lgs. 36/2023): Non intende avvalersi del subappalto
+- Subcontratti (art. 119 co. 3 lett. d D.Lgs. 36/2023): Non intende avvalersi di subcontratti
+- White List (D.P.C.M. 18 aprile 2013 / L. 190/2012): Non iscritto nella White List
+- Accesso agli atti (art. 35 D.Lgs. 36/2023): Autorizza l'accesso a tutta la documentazione presentata per la gara
+- Standard sociali minimi di fornitura: Beni prodotti in conformità con gli standard sociali minimi
