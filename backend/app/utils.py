@@ -584,30 +584,40 @@ template_inferrer = Agent(
     output_type=TemplateStr,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more unfilled PDF forms,
-        optionally preceded by an existing profile template.
+        You will receive images of pages from one or more unfilled (or partially filled)
+        PDF forms, optionally preceded by an existing profile template.
         Create a reusable profile template (in Italian) containing the information
         needed to fill forms like these, or update the existing one if provided.
         Follow these rules:
-        - If an existing template is provided, integrate any missing information
-          needed for the forms. You may reorganize or refine the structure for
-          clarity and coherence, but preserve existing information, user choices
-          (e.g. [x] selections or custom values), and exact {placeholder} names
-          (avoid creating duplicate or renamed placeholders for the same data).
+        - If an existing template is provided, adapt to its existing structure,
+          formatting, and indentation style, and integrate any missing
+          information needed for the forms without reformatting existing lines.
+          Preserve existing information, user choices (e.g. [x] selections or
+          custom values), and exact {placeholder} names (avoid creating duplicate
+          or renamed placeholders for the same data).
         - For direct identifiers and sensitive text values (e.g. names, VAT/tax
           codes, addresses, emails, phone numbers, IBANs, ID numbers), use
           {snake_case} Python format placeholders.
         - For non-identifying attributes, categories, and facts needed to answer
           choice checkboxes (e.g. legal form, enterprise size, gender, sector,
-          certifications), list the available options as [ ] checkboxes indented
-          by 2 spaces under their label (or the 2 most common choices if
-          open-ended) and always end with "  [ ] ..." so the user can mark [x]
-          or write a custom value/condition (e.g.
-          "Forma giuridica:\n  [ ] S.r.l.\n  [ ] Ditta individuale\n  [ ] ...",
-          "Settore di attività:\n  [ ] Manifatturiero\n  [ ] Commercio e servizi\n  [ ] ...").
-          Never use curly braces { } for these.
-        - Use consistent 2-space indentation for nested items and checkbox
-          options.
+          certifications):
+          - For mutually exclusive single-choice fields, use inline bracketed
+            options ending with "..." so the user can edit it down to the
+            chosen value (e.g.
+            "Forma giuridica: [S.r.l. | Ditta individuale | ...]").
+          - For multi-choice fields or when multiple options should remain
+            visible for context, list them as unresolved [] checkboxes under
+            their label (or the 2 most common choices if open-ended) and end
+            with a "[] ..." option so the user can mark [x] (checked) or [ ]
+            (explicitly unchecked) (e.g.
+            "Settore di attività:\n  [] Manifatturiero\n  [] Commercio e servizi\n  [] ...").
+          - Never use curly braces { } for these, and do not revert already
+            resolved values or marked [x]/[ ] checkboxes in an existing template
+            back to unresolved [] or [A | B | ...].
+        - When creating a new template (or when an existing template has no
+          clear convention), use consistent 2-space indentation for nested items
+          and checkbox options. Otherwise, match the existing template's
+          indentation and formatting.
         - Ignore mandatory "must-accept" declarations and consents where the
           applicant has no real choice (e.g. no criminal convictions, not in
           bankruptcy/liquidation, no tax arrears, having read the rules,
@@ -628,19 +638,22 @@ template_inferrer_demo = Agent(
     output_type=ProfileBase,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more unfilled PDF forms,
-        optionally preceded by an existing profile template.
+        You will receive images of pages from one or more unfilled (or partially filled)
+        PDF forms, optionally preceded by an existing profile template.
         Create a ready-to-use demo profile (in Italian) populated with coherent,
         realistic fake data suitable for filling forms like these, or update and
         complete the existing template if provided.
         Return a ProfileBase with:
         - template:
-          - If an existing template is provided, integrate any missing
-            information needed for the forms. You may reorganize or refine the
-            structure for clarity and coherence, while preserving existing
-            information, already-selected choices, and exact {placeholder}
-            names. If the existing template contains unfilled [ ] checkbox
-            groups, select a coherent, realistic option by marking it as [x].
+          - If an existing template is provided, adapt to its existing
+            structure, formatting, and indentation style, and integrate any
+            missing information needed for the forms without reformatting
+            existing lines. Preserve existing information, already-selected
+            choices, and exact {placeholder} names. If the existing template
+            contains unresolved [] or [ ] checkbox groups, mark coherent,
+            realistic selections as [x] (and [ ] for unselected ones). If it
+            contains inline [A | B | ...] choices, replace them with a single
+            coherent, realistic value.
           - For direct identifiers and sensitive text values (e.g. names,
             VAT/tax codes, addresses, emails, phone numbers, IBANs, ID numbers),
             use {snake_case} Python format placeholders.

@@ -42,6 +42,16 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 
 const PLACEHOLDER_TOKEN_REGEX = /(\{\{|\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\})/g
+const TEMPLATE_TOKEN_REGEX =
+  /(\{\{|\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\}|\[\]|\[\s\]|\[[xX]\]|\[[^[\]\n]+\])/g
+const RESOLVED_CHECKBOX_REGEX = /^\[(?:\s|[xX])\]$/
+const UNRESOLVED_BRACKET_REGEX = /^\[[^[\]\n]*\]$/
+const ATTENTION_TOKEN_CLASS =
+  "rounded-xs bg-amber-500/20 font-medium text-amber-800 dark:text-amber-300"
+const RESOLVED_TOKEN_CLASS =
+  "rounded-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+const HINT_PILL_CLASS =
+  "pointer-events-none absolute top-full left-0 z-30 mt-1 whitespace-nowrap rounded-md border bg-popover px-2 py-0.5 font-sans text-xs font-normal text-popover-foreground shadow-sm"
 
 type Segment = {
   id: number
@@ -125,13 +135,14 @@ function extractPlaceholders(template: string): string[] {
   return Array.from(keys).sort()
 }
 
-function renderPlaceholders(
+function renderTokens(
   text: string,
-  hoveredIndex: number | null,
-  onHoverChange: (index: number | null) => void,
+  sensitiveData: Record<string, string>,
+  hoveredTokenIndex: number | null,
+  onHoverTokenChange: (index: number | null) => void,
   onFocusPlaceholder: (key: string) => void,
 ) {
-  return text.split(PLACEHOLDER_TOKEN_REGEX).map((part, index) => {
+  return text.split(TEMPLATE_TOKEN_REGEX).map((part, index) => {
     if (
       part.startsWith("{") &&
       part.endsWith("}") &&
@@ -139,17 +150,19 @@ function renderPlaceholders(
       part !== "}}"
     ) {
       const key = part.slice(1, -1)
+      const isFilled = Boolean(sensitiveData[key]?.trim())
       return (
         <span
           key={index}
-          data-placeholder-index={index}
-          className="relative rounded-xs bg-primary/15 text-primary"
+          data-token-index={index}
+          data-has-button="true"
+          className={`relative ${isFilled ? RESOLVED_TOKEN_CLASS : ATTENTION_TOKEN_CLASS}`}
         >
-          {hoveredIndex === index && (
+          {hoveredTokenIndex === index && (
             <button
               type="button"
               title={`Fill {${key}}`}
-              onMouseLeave={() => onHoverChange(null)}
+              onMouseLeave={() => onHoverTokenChange(null)}
               onMouseDown={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -158,7 +171,7 @@ function renderPlaceholders(
                 e.stopPropagation()
                 onFocusPlaceholder(key)
               }}
-              className="pointer-events-auto absolute top-1/2 left-full z-20 ml-0.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xs transition-transform hover:scale-110"
+              className={`pointer-events-auto absolute top-1/2 left-full z-20 ml-0.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow-xs transition-transform hover:scale-110 ${isFilled ? "bg-emerald-600" : "bg-amber-600"}`}
             >
               <Pencil className="size-2.5" />
             </button>
@@ -167,6 +180,46 @@ function renderPlaceholders(
         </span>
       )
     }
+
+    if (RESOLVED_CHECKBOX_REGEX.test(part)) {
+      const isChecked = part[1].toLowerCase() === "x"
+      return (
+        <span
+          key={index}
+          data-token-index={index}
+          className={`relative ${
+            isChecked
+              ? `${RESOLVED_TOKEN_CLASS} font-semibold`
+              : RESOLVED_TOKEN_CLASS
+          }`}
+        >
+          {hoveredTokenIndex === index && (
+            <span className={HINT_PILL_CLASS}>[x] checked · [ ] unchecked</span>
+          )}
+          {part}
+        </span>
+      )
+    }
+
+    if (UNRESOLVED_BRACKET_REGEX.test(part)) {
+      const hint =
+        part === "[]"
+          ? "[x] checked · [ ] unchecked"
+          : "Replace with a value without brackets"
+      return (
+        <span
+          key={index}
+          data-token-index={index}
+          className={`relative ${ATTENTION_TOKEN_CLASS}`}
+        >
+          {hoveredTokenIndex === index && (
+            <span className={HINT_PILL_CLASS}>{hint}</span>
+          )}
+          {part}
+        </span>
+      )
+    }
+
     return part
   })
 }
@@ -174,6 +227,7 @@ function renderPlaceholders(
 function SegmentEditor({
   segment,
   isOnlyNormal,
+  sensitiveData,
   onChange,
   onKeep,
   onRemove,
@@ -181,36 +235,36 @@ function SegmentEditor({
 }: {
   segment: Segment
   isOnlyNormal: boolean
+  sensitiveData: Record<string, string>
   onChange: (text: string) => void
   onKeep: () => void
   onRemove: () => void
   onFocusPlaceholder: (key: string) => void
 }) {
-  const [hoveredPlaceholderIndex, setHoveredPlaceholderIndex] = useState<
-    number | null
-  >(null)
+  const [hoveredTokenIndex, setHoveredTokenIndex] = useState<number | null>(
+    null,
+  )
   const highlightLayerRef = useRef<HTMLDivElement | null>(null)
 
   const handleMouseMove = (e: React.MouseEvent<HTMLTextAreaElement>) => {
     const layer = highlightLayerRef.current
     if (!layer) return
-    const spans = layer.querySelectorAll<HTMLElement>(
-      "[data-placeholder-index]",
-    )
+    const spans = layer.querySelectorAll<HTMLElement>("[data-token-index]")
     for (const span of spans) {
+      const rightPad = span.dataset.hasButton === "true" ? 20 : 0
       for (const rect of span.getClientRects()) {
         if (
           e.clientX >= rect.left &&
-          e.clientX <= rect.right + 20 &&
+          e.clientX <= rect.right + rightPad &&
           e.clientY >= rect.top - 2 &&
           e.clientY <= rect.bottom + 2
         ) {
-          setHoveredPlaceholderIndex(Number(span.dataset.placeholderIndex))
+          setHoveredTokenIndex(Number(span.dataset.tokenIndex))
           return
         }
       }
     }
-    setHoveredPlaceholderIndex(null)
+    setHoveredTokenIndex(null)
   }
 
   const isDiff = segment.type !== "normal"
@@ -268,10 +322,11 @@ function SegmentEditor({
           aria-hidden="true"
           className="pointer-events-none relative z-10 col-start-1 row-start-1 w-full font-mono text-sm leading-relaxed whitespace-pre-wrap break-words"
         >
-          {renderPlaceholders(
+          {renderTokens(
             segment.text,
-            hoveredPlaceholderIndex,
-            setHoveredPlaceholderIndex,
+            sensitiveData,
+            hoveredTokenIndex,
+            setHoveredTokenIndex,
             onFocusPlaceholder,
           )}
           {segment.text === "" || segment.text.endsWith("\n") ? " " : null}
@@ -288,7 +343,7 @@ function SegmentEditor({
                 e.relatedTarget.closest("button")
               )
             ) {
-              setHoveredPlaceholderIndex(null)
+              setHoveredTokenIndex(null)
             }
           }}
           placeholder={
@@ -660,6 +715,7 @@ function ProfileContent() {
                 key={segment.id}
                 segment={segment}
                 isOnlyNormal={segments.length === 1}
+                sensitiveData={activeSensitiveData}
                 onChange={(nextText) =>
                   setSegments((prev) =>
                     prev.map((s) =>
