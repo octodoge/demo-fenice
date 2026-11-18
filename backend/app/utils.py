@@ -192,6 +192,7 @@ class MissingWidget(BaseModel):
             "[ymin, xmin, ymax, xmax] normalized to 0-1000."
         ),
     )
+    # TODO: adapt all code: drop "signature" and handle multiline text on top of "text"
     type: Literal["text", "checkbox", "signature"] = Field(
         description="The type of the missing widget."
     )
@@ -220,12 +221,12 @@ class DetectorDeps:
 
 widget_detector = Agent(
     GoogleModel(
-        "gemini-3.8-flash",
+        "gemini-4-carbon",  # TODO: gemini-3.8-flash?
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
     model_settings=GoogleModelSettings(
         thinking="low"
-    ),  # low instead of medium solved drift once
+    ),  # low instead of medium solved drift once with gemini 3.8
     output_type=list[MissingWidget],
     deps_type=DetectorDeps,
     validation_context=lambda ctx: ctx.deps,
@@ -440,6 +441,8 @@ value_inferrer = Agent(
         - Text widgets: return the text to fill in. You may use the exact
           {placeholder} tags from the profile as Python format placeholders
           (e.g. "{company_name} - {vat_number}"). Escape literal braces as {{ }}.
+          For multi-line areas split across consecutive single-line widgets,
+          wrap long text across them to fit each line's width.
         - Checkboxes: return true or false. Always return true for mandatory
           "must-accept" declarations and consents where the applicant has no
           real choice (e.g. no criminal convictions, not in

@@ -72,11 +72,18 @@ function mergeAdjacentNormals(segments: Segment[]): Segment[] {
   return merged.length > 0 ? merged : [{ id: 0, text: "", type: "normal" }]
 }
 
+function ensureTrailingNewline(value: string): string {
+  return value.length > 0 && !value.endsWith("\n") ? `${value}\n` : value
+}
+
 function buildSegmentsFromDiff(
   oldTemplate: string,
   newTemplate: string,
 ): Segment[] {
-  const changes = diffLines(oldTemplate, newTemplate)
+  const changes = diffLines(
+    ensureTrailingNewline(oldTemplate),
+    ensureTrailingNewline(newTemplate),
+  )
   const rawSegments: Segment[] = []
   let nextId = 1
 
