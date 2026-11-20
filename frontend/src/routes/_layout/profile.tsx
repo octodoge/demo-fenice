@@ -7,13 +7,16 @@ import {
 } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { diffLines } from "diff"
-import { Check, Pencil, Save, Sparkles, Upload, X } from "lucide-react"
+import { Check, Pencil, Save, Sparkles, Upload, Wand2, X } from "lucide-react"
 import { Suspense, useCallback, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import { type ProfileBase, type ProfileCreate, ProfileService } from "@/client"
+import {
+  type ProfileCreate,
+  ProfileService,
+  type TemplateInferrerOutput,
+} from "@/client"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogClose,
@@ -42,14 +45,13 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 
 const PLACEHOLDER_TOKEN_REGEX = /(\{\{|\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\})/g
-const TEMPLATE_TOKEN_REGEX =
-  /(\{\{|\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\}|\[\]|\[\s\]|\[[xX]\]|\[[^[\]\n]+\])/g
-const RESOLVED_CHECKBOX_REGEX = /^\[(?:\s|[xX])\]$/
-const UNRESOLVED_BRACKET_REGEX = /^\[[^[\]\n]*\]$/
+const VALID_PLACEHOLDER_KEY_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+const TEMPLATE_TOKEN_REGEX = /(\{\{|\}\}|\{[^{}\n]*\}|\[[^[\]\n]*\])/g
+const RESOLVED_CHECKBOX_REGEX = /^\[(?: |[xX])\]$/
 const ATTENTION_TOKEN_CLASS =
   "rounded-xs bg-amber-500/20 font-medium text-amber-800 dark:text-amber-300"
-const RESOLVED_TOKEN_CLASS =
-  "rounded-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+const FILLED_TOKEN_CLASS =
+  "rounded-xs bg-emerald-500/20 font-medium text-emerald-800 dark:text-emerald-300"
 const HINT_PILL_CLASS =
   "pointer-events-none absolute top-full left-0 z-30 mt-1 whitespace-nowrap rounded-md border bg-popover px-2 py-0.5 font-sans text-xs font-normal text-popover-foreground shadow-sm"
 
@@ -157,15 +159,20 @@ function renderTokens(
       part !== "}}"
     ) {
       const key = part.slice(1, -1)
-      const isFilled = Boolean(sensitiveData[key]?.trim())
+      const isValid = VALID_PLACEHOLDER_KEY_REGEX.test(key)
+      const isFilled = isValid && Boolean(sensitiveData[key]?.trim())
       return (
         <span
           key={index}
           data-token-index={index}
-          data-has-button="true"
-          className={`relative ${isFilled ? RESOLVED_TOKEN_CLASS : ATTENTION_TOKEN_CLASS}`}
+          data-has-button={isValid ? "true" : undefined}
+          className={
+            isFilled
+              ? `relative ${FILLED_TOKEN_CLASS}`
+              : `relative ${ATTENTION_TOKEN_CLASS}`
+          }
         >
-          {hoveredTokenIndex === index && (
+          {isValid && hoveredTokenIndex === index && (
             <button
               type="button"
               title={`Fill {${key}}`}
@@ -178,49 +185,36 @@ function renderTokens(
                 e.stopPropagation()
                 onFocusPlaceholder(key)
               }}
-              className={`pointer-events-auto absolute top-1/2 left-full z-20 ml-0.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow-xs transition-transform hover:scale-110 ${isFilled ? "bg-emerald-600" : "bg-amber-600"}`}
+              className={`pointer-events-auto absolute top-1/2 left-full z-20 ml-0.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow-xs transition-transform hover:scale-110 ${isFilled ? "bg-primary" : "bg-amber-600"}`}
             >
               <Pencil className="size-2.5" />
             </button>
           )}
-          {part}
-        </span>
-      )
-    }
-
-    if (RESOLVED_CHECKBOX_REGEX.test(part)) {
-      const isChecked = part[1].toLowerCase() === "x"
-      return (
-        <span
-          key={index}
-          data-token-index={index}
-          className={`relative ${
-            isChecked
-              ? `${RESOLVED_TOKEN_CLASS} font-semibold`
-              : RESOLVED_TOKEN_CLASS
-          }`}
-        >
-          {hoveredTokenIndex === index && (
-            <span className={HINT_PILL_CLASS}>[x] checked · [ ] unchecked</span>
+          {!isValid && hoveredTokenIndex === index && (
+            <span className={HINT_PILL_CLASS}>
+              Invalid placeholder · use letters, digits, or _
+            </span>
           )}
           {part}
         </span>
       )
     }
 
-    if (UNRESOLVED_BRACKET_REGEX.test(part)) {
-      const hint =
-        part === "[]"
-          ? "[x] checked · [ ] unchecked"
-          : "Replace with a value without brackets"
+    if (part.startsWith("[") && part.endsWith("]")) {
+      const isResolved = RESOLVED_CHECKBOX_REGEX.test(part)
       return (
         <span
           key={index}
-          data-token-index={index}
-          className={`relative ${ATTENTION_TOKEN_CLASS}`}
+          data-token-index={isResolved ? undefined : index}
+          className={
+            isResolved ? "relative" : `relative ${ATTENTION_TOKEN_CLASS}`
+          }
         >
-          {hoveredTokenIndex === index && (
-            <span className={HINT_PILL_CLASS}>{hint}</span>
+          {!isResolved && hoveredTokenIndex === index && (
+            <span className={HINT_PILL_CLASS}>
+              <span className="font-mono">[x]</span> checked ·{" "}
+              <span className="font-mono">[ ]</span> unchecked
+            </span>
           )}
           {part}
         </span>
@@ -252,6 +246,23 @@ function SegmentEditor({
     null,
   )
   const highlightLayerRef = useRef<HTMLDivElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = e.target.value
+    const pos = e.target.selectionStart
+    if (
+      nextValue.length === segment.text.length + 1 &&
+      pos === e.target.selectionEnd &&
+      pos >= 2 &&
+      RESOLVED_CHECKBOX_REGEX.test(nextValue.slice(pos - 2, pos + 1))
+    ) {
+      requestAnimationFrame(() => {
+        textareaRef.current?.setSelectionRange(pos - 1, pos - 1)
+      })
+    }
+    onChange(nextValue)
+  }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLTextAreaElement>) => {
     const layer = highlightLayerRef.current
@@ -339,9 +350,10 @@ function SegmentEditor({
           {segment.text === "" || segment.text.endsWith("\n") ? " " : null}
         </div>
         <textarea
+          ref={textareaRef}
           rows={1}
           value={segment.text}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={handleChange}
           onMouseMove={handleMouseMove}
           onMouseLeave={(e) => {
             if (
@@ -379,15 +391,17 @@ export const Route = createFileRoute("/_layout/profile")({
 
 function InferTemplateDialog({
   template,
+  disabled,
   onSuccess,
 }: {
   template: string
-  onSuccess: (profile: ProfileBase, demo: boolean) => void
+  disabled?: boolean
+  onSuccess: (inferred: TemplateInferrerOutput) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [files, setFiles] = useState<File[]>([])
-  const [demo, setDemo] = useState(false)
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const hasTemplate = template.trim().length > 0
 
   const onFileReject = useCallback((file: File, message: string) => {
     toast(message, {
@@ -396,15 +410,13 @@ function InferTemplateDialog({
   }, [])
 
   const inferMutation = useMutation({
-    mutationFn: ({ files, demo }: { files: File[]; demo: boolean }) =>
+    mutationFn: ({ files }: { files: File[] }) =>
       ProfileService.inferProfileTemplate({
         body: { files, template },
-        query: { demo },
       }),
-    onSuccess: (res, variables) => {
-      onSuccess(res.data, variables.demo)
+    onSuccess: (res) => {
+      onSuccess(res.data)
       setFiles([])
-      setDemo(false)
       setIsOpen(false)
       showSuccessToast("Profile template generated")
     },
@@ -418,24 +430,24 @@ function InferTemplateDialog({
     setIsOpen(open)
     if (!open) {
       setFiles([])
-      setDemo(false)
     }
   }
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline">
+        <Button variant="outline" disabled={disabled}>
           <Sparkles className="mr-2" />
-          Generate from PDFs
+          Generate / Refactor
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Generate from PDFs</DialogTitle>
+          <DialogTitle>Generate or Refactor Template</DialogTitle>
           <DialogDescription>
-            Upload example PDF forms to infer a profile template and sensitive
-            data placeholders.
+            Upload example PDF forms to infer or expand your profile template,
+            or run without files to refactor the current template to follow the
+            standard structure.
           </DialogDescription>
         </DialogHeader>
         <FileUpload
@@ -487,20 +499,6 @@ function InferTemplateDialog({
             ))}
           </FileUploadList>
         </FileUpload>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="infer-demo"
-            checked={demo}
-            onCheckedChange={(checked) => setDemo(checked === true)}
-            disabled={inferMutation.isPending}
-          />
-          <Label
-            htmlFor="infer-demo"
-            className="cursor-pointer text-sm font-normal"
-          >
-            Populate with sample data
-          </Label>
-        </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={inferMutation.isPending}>
@@ -509,10 +507,10 @@ function InferTemplateDialog({
           </DialogClose>
           <LoadingButton
             loading={inferMutation.isPending}
-            disabled={files.length === 0}
-            onClick={() => inferMutation.mutate({ files, demo })}
+            disabled={files.length === 0 && !hasTemplate}
+            onClick={() => inferMutation.mutate({ files })}
           >
-            Generate
+            {files.length === 0 && hasTemplate ? "Refactor" : "Generate"}
           </LoadingButton>
         </DialogFooter>
       </DialogContent>
@@ -533,7 +531,11 @@ function PendingProfile() {
         <div className="my-4 flex items-center gap-2">
           <Button variant="outline" disabled>
             <Sparkles className="mr-2" />
-            Generate from PDFs
+            Generate / Refactor
+          </Button>
+          <Button variant="outline" disabled>
+            <Wand2 className="mr-2" />
+            Fill Demo Data
           </Button>
           <LoadingButton disabled>
             <Save className="mr-2" />
@@ -674,6 +676,20 @@ function ProfileContent() {
     onError: handleError.bind(showErrorToast),
   })
 
+  const fillDemoMutation = useMutation({
+    mutationFn: (currentTemplate: string) =>
+      ProfileService.fillDemoProfile({ body: { template: currentTemplate } }),
+    onSuccess: (res) => {
+      setSegments(buildSegmentsFromDiff(template, res.data.template))
+      setSensitiveValues((prev) => ({
+        ...prev,
+        ...res.data.sensitive_data,
+      }))
+      showSuccessToast("Demo data populated")
+    },
+    onError: handleError.bind(showErrorToast),
+  })
+
   const handleSave = () => {
     mutation.mutate({
       template,
@@ -693,18 +709,37 @@ function ProfileContent() {
         <div className="my-4 flex items-center gap-2">
           <InferTemplateDialog
             template={template}
-            onSuccess={(inferred, demo) => {
+            disabled={fillDemoMutation.isPending || mutation.isPending}
+            onSuccess={(inferred) => {
               setSegments(buildSegmentsFromDiff(template, inferred.template))
-              setSensitiveValues((prev) =>
-                demo
-                  ? { ...prev, ...inferred.sensitive_data }
-                  : { ...inferred.sensitive_data, ...prev },
-              )
+              const map = inferred.placeholder_map ?? {}
+              setSensitiveValues((prev) => {
+                const next = { ...prev }
+                for (const [oldKey, newKey] of Object.entries(map)) {
+                  if (prev[oldKey] && !next[newKey]) {
+                    next[newKey] = prev[oldKey]
+                  }
+                }
+                return next
+              })
             }}
           />
           <LoadingButton
+            variant="outline"
+            loading={fillDemoMutation.isPending}
+            disabled={
+              !template.trim() || hasUnresolvedDiffs || mutation.isPending
+            }
+            onClick={() => fillDemoMutation.mutate(template)}
+          >
+            <Wand2 className="mr-2" />
+            Fill Demo Data
+          </LoadingButton>
+          <LoadingButton
             loading={mutation.isPending}
-            disabled={!isDirty || hasUnresolvedDiffs}
+            disabled={
+              !isDirty || hasUnresolvedDiffs || fillDemoMutation.isPending
+            }
             onClick={handleSave}
           >
             <Save className="mr-2" />

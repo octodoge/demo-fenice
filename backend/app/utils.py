@@ -433,7 +433,9 @@ value_inferrer = Agent(
     instructions=cleandoc(
         """
         You will receive a company profile (with sensitive values redacted as
-        {placeholder} tags) and images of PDF form pages.
+        {placeholder} tags and checkbox options marked as "[x]" = accepted/selected,
+        "[ ]" = not accepted/unselected, or "[]" = undefined/unanswered) and images of
+        PDF form pages.
         Each page is preceded by its key (e.g. page_0, page_1).
         Fillable widgets are outlined and labeled with a 2-letter badge ID
         (red = text, blue = checkbox; ignore green signature widgets).
@@ -448,9 +450,10 @@ value_inferrer = Agent(
           real choice (e.g. no criminal convictions, not in
           bankruptcy/liquidation, no tax arrears, having read the rules,
           privacy/GDPR consent).
-        - If a field cannot be filled (missing info or a checkbox depends on
-          a redacted {placeholder}), DO NOT guess: return an Annotation with a
-          concise note explaining what is needed (and how to improve the profile).
+        - If a field cannot be filled (missing info, or it depends on a redacted
+          {placeholder} or an undefined "[]" checkbox in the profile), DO NOT guess:
+          return an Annotation with a concise note explaining what is needed (and how
+          to improve or complete the profile).
         """
     ),
 )
@@ -561,21 +564,77 @@ def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None
                 widget.update()
 
 
-def _validate_template_str(value: str) -> str:
-    try:
-        keys = [name for _, name, _, _ in Formatter().parse(value) if name is not None]
-    except ValueError as err:
-        raise ValueError(f"Invalid format string syntax: {err}") from err
+class TemplateInferrerOutput(BaseModel):
+    template: str = Field(description="The inferred or refactored profile template.")
+    placeholder_map: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Map of old placeholder names to new placeholder names (without curly "
+            "braces) when placeholders from an existing template are renamed to "
+            "follow the naming rules (e.g. {'nome_del_dichiarante': 'dichiarante_nome'})."
+        ),
+    )
 
-    if invalid := [k for k in keys if not k.isidentifier()]:
-        raise ValueError(
-            "Placeholders must be valid Python identifiers: "
-            f"{', '.join(sorted(set(invalid)))}"
+    @field_validator("template")
+    @classmethod
+    def validate_template(cls, value: str) -> str:
+        try:
+            keys = [
+                name for _, name, _, _ in Formatter().parse(value) if name is not None
+            ]
+        except ValueError as err:
+            raise ValueError(f"Invalid format string syntax: {err}") from err
+
+        if invalid := [k for k in keys if not k.isidentifier()]:
+            raise ValueError(
+                "Placeholders must be valid Python identifiers: "
+                f"{', '.join(sorted(set(invalid)))}"
+            )
+        if bad_parts := [k for k in keys if len(k.split("_")) not in (2, 3)]:
+            raise ValueError(
+                "Placeholders must consist of 2 or 3 words separated by underscores: "
+                f"{', '.join(sorted(set(bad_parts)))}"
+            )
+        return value
+
+    @field_validator("placeholder_map")
+    @classmethod
+    def validate_placeholder_map(
+        cls, value: dict[str, str], info: ValidationInfo
+    ) -> dict[str, str]:
+        template = info.data.get("template")
+        if template is None:
+            return value
+
+        new_keys = {
+            name for _, name, _, _ in Formatter().parse(template) if name is not None
+        }
+        old_keys = (
+            info.context.old_keys
+            if isinstance(info.context, TemplateInferrerDeps)
+            else set()
         )
-    return value
+
+        for old_k, new_k in value.items():
+            if not old_k.isidentifier() or not new_k.isidentifier():
+                raise ValueError(
+                    "Placeholder map keys and values must be valid identifiers "
+                    f"without braces: {old_k!r} -> {new_k!r}"
+                )
+            if old_keys and old_k not in old_keys:
+                raise ValueError(
+                    f"Mapped source placeholder {old_k!r} was not in the existing template"
+                )
+            if new_k not in new_keys:
+                raise ValueError(
+                    f"Mapped target placeholder {new_k!r} is not present in the new template"
+                )
+        return value
 
 
-TemplateStr = Annotated[str, AfterValidator(_validate_template_str)]
+@dataclass
+class TemplateInferrerDeps:
+    old_keys: set[str]
 
 
 template_inferrer = Agent(
@@ -584,55 +643,107 @@ template_inferrer = Agent(
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
     model_settings=GoogleModelSettings(thinking="medium"),
-    output_type=TemplateStr,
+    output_type=TemplateInferrerOutput,
+    deps_type=TemplateInferrerDeps,
+    validation_context=lambda ctx: ctx.deps,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more unfilled (or partially filled)
-        PDF forms, optionally preceded by an existing profile template.
-        Create a reusable profile template (in Italian) containing the information
-        needed to fill forms like these, or update the existing one if provided.
-        Follow these rules:
-        - If an existing template is provided, adapt to its existing structure,
-          formatting, and indentation style, and integrate any missing
-          information needed for the forms without reformatting existing lines.
-          Preserve existing information, user choices (e.g. [x] selections or
-          custom values), and exact {placeholder} names (avoid creating duplicate
-          or renamed placeholders for the same data).
-        - For direct identifiers and sensitive text values (e.g. names, VAT/tax
-          codes, addresses, emails, phone numbers, IBANs, ID numbers), use
-          {snake_case} Python format placeholders.
-        - For non-identifying attributes, categories, and facts needed to answer
-          choice checkboxes (e.g. legal form, enterprise size, gender, sector,
-          certifications):
-          - For mutually exclusive single-choice fields, use inline bracketed
-            options ending with "..." so the user can edit it down to the
-            chosen value (e.g.
-            "Forma giuridica: [S.r.l. | Ditta individuale | ...]").
-          - For multi-choice fields or when multiple options should remain
-            visible for context, list them as unresolved [] checkboxes under
-            their label (or the 2 most common choices if open-ended) and end
-            with a "[] ..." option so the user can mark [x] (checked) or [ ]
-            (explicitly unchecked) (e.g.
-            "Settore di attività:\n  [] Manifatturiero\n  [] Commercio e servizi\n  [] ...").
-          - Never use curly braces { } for these, and do not revert already
-            resolved values or marked [x]/[ ] checkboxes in an existing template
-            back to unresolved [] or [A | B | ...].
-        - When creating a new template (or when an existing template has no
-          clear convention), use consistent 2-space indentation for nested items
-          and checkbox options. Otherwise, match the existing template's
-          indentation and formatting.
+        You will receive images of pages from one or more PDF forms, an existing
+        profile template, or both (PDFs only to build from scratch, a template only
+        to refactor, or both to refactor and expand).
+
+        Your goal is to produce a schematic, general, reusable profile template in
+        Italian that generalizes the information required across all provided PDFs
+        and any existing template, so the user can fill it once and reuse it to
+        populate any similar form.
+
+        ### 1. Structure & Indentation
+        - Group related information into thematic sections. Each section begins with
+          a descriptive title in ALL CAPS (e.g. `DATI DEL DICHIARANTE`).
+        - Start the section's items on the line immediately below its title (no blank
+          line after a title). Use a single blank line only to separate sections.
+        - Follow this exact hierarchy and space indentation:
+          - **Level 1 (bullet)**: column 0, prefix `"- "`. Colons are optional
+            (key-value style or direct statements are both fine).
+          - **Level 2 (nested bullet OR checkbox)**: 2 spaces indent under a Level 1
+            bullet:
+            - Nested bullet (`"  - "`) for sub-fields. Cannot have further children.
+            - Checkbox (`"  [] "`, `"  [x] "`, or `"  [ ] "`) for selectable options.
+              Never add `"- "` before a checkbox. Checkboxes are only allowed at
+              Level 2 (never directly under a section title or under a Level 2 item).
+          - **Level 3 (detail bullet under a checkbox only)**: 6 spaces indent
+            (`"      - "`), aligning with the checkbox label text once marked
+            (`"  [x] "` is 6 characters). Allowed only directly under a checkbox to
+            capture conditional details for that option; cannot have further
+            children.
+
+        Example:
+        ```
+        DATI DEL DICHIARANTE
+        - Nome: {dichiarante_nome}
+        - Nascita:
+          - Data: {dichiarante_nascita_data}
+          - Luogo: {dichiarante_nascita_luogo}
+        - Qualifica:
+          [] Legale rappresentante
+          [] Procuratore (estremi procura: {dichiarante_qualifica_procura})
+              - Data procura: {dichiarante_qualifica_data}
+        ```
+
+        ### 2. Placeholders vs. Checkboxes
+        Use common sense based on how real PDF forms collect each piece of data:
+        - **Placeholders (`{placeholder}`)**: use for text inputs. Users either
+          replace a placeholder inline with non-sensitive text or keep it and store
+          the value in the sensitive data dictionary.
+          - Every placeholder must be a lowercase Python identifier made of strictly
+            2 or 3 single words separated by underscores (1 or 2 underscores total;
+            do not use underscores inside a word).
+          - The **first word** must identify the section and be unique to that
+            section so placeholders stay alphabetically grouped by section (e.g.
+            `dichiarante`, `impresa`, `banca`).
+          - Word count follows the item's position in the hierarchy:
+            - **2 words** (`{section_field}`): on a Level 1 bullet (`"- "`).
+            - **3 words** (`{section_parent_detail}`): on anything nested under a
+              Level 1 bullet—Level 2 regular bullets (`"  - "`), Level 2 checkbox
+              lines (`"  [] "`), and Level 3 detail bullets under a checkbox
+              (`"      - "`)—where the second word identifies the Level 1 bullet
+              and the third word identifies the specific detail.
+        - **Checkboxes**: use for multiple-choice fields (single or multi-select)
+          when the options are few or lengthy, making selection simpler than typing.
+          When options are open-ended or numerous, use a `{placeholder}` instead
+          (just as real PDFs use a text box).
+          - States: `"[]"` = undefined (unanswered), `"[x]"` = accepted/selected,
+            `"[ ]"` = not accepted/unselected.
+          - Initialize all newly created checkboxes as `"[]"` (never pre-fill new
+            options with `"[x]"` or `"[ ]"`).
+          - Never include catch-all `"[] ..."` or blank `"[]"` options.
+
+        ### 3. Refactoring & Merging an Existing Template
+        - Refactor the entire template so it strictly conforms to all structure,
+          indentation, checkbox, and placeholder naming rules above, while
+          integrating any missing fields from the provided PDFs.
+        - Preserve all existing information and already-filled non-sensitive text.
+        - Preserve existing user choices as `"[x]"` (accepted) or `"[ ]"` (not
+          accepted)—including when converting previously resolved choices into
+          checkboxes—while keeping unanswered or newly added options as `"[]"`.
+        - Whenever an existing `{placeholder}` is renamed to comply with the naming
+          rules (e.g. `{nome_del_dichiarante}` -> `{dichiarante_nome}`), record the
+          mapping in `placeholder_map` using bare identifier names without braces
+          (e.g. `{"nome_del_dichiarante": "dichiarante_nome"}`) so existing
+          sensitive data can be migrated without loss.
+
+        ### 4. Exclusions
         - Ignore mandatory "must-accept" declarations and consents where the
           applicant has no real choice (e.g. no criminal convictions, not in
           bankruptcy/liquidation, no tax arrears, having read the rules,
-          privacy/GDPR consent), as well as form-specific procedural fields
-          (e.g. signature dates, attachment checklists).
-        - Return only the profile template text.
+          privacy/GDPR consent), as well as form-specific procedural fields (e.g.
+          signature dates, attachment checklists).
         """
     ),
 )
 
 
-template_inferrer_demo = Agent(
+profile_filler_demo = Agent(
     GoogleModel(
         "gemini-3.8-flash",
         provider=GoogleProvider(api_key=ai_studio_api_key),
@@ -641,38 +752,43 @@ template_inferrer_demo = Agent(
     output_type=ProfileBase,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more unfilled (or partially filled)
-        PDF forms, optionally preceded by an existing profile template.
-        Create a ready-to-use demo profile (in Italian) populated with coherent,
-        realistic fake data suitable for filling forms like these, or update and
-        complete the existing template if provided.
+        You will receive a profile template (in Italian) containing {placeholder} tags
+        and checkbox options ("[]" = undefined, "[x]" = accepted, "[ ]" = not accepted).
+        Populate the profile with coherent, realistic Italian fake data without
+        restructuring the template.
+
+        Distinguish between sensitive and non-sensitive {placeholder} tags:
+        - **Sensitive data** (keep as `{placeholder}` in `template` and put the fake
+          value in `sensitive_data`): personal or identifying details, contact info,
+          tax/ID codes, dates/places of birth, addresses, bank/IBAN details,
+          registration/policy/matricola numbers, and similar confidential fields
+          (e.g. `{dichiarante_nome}`, `{dichiarante_cf}`, `{impresa_piva}`,
+          `{impresa_sede_indirizzo}`, `{impresa_pec}`, `{banca_iban}`).
+        - **Non-sensitive data** (replace the `{placeholder}` directly inline in
+          `template` with the realistic Italian fake value, and omit it from
+          `sensitive_data`): general, categorical, or descriptive info that does not
+          identify or expose sensitive details (e.g. legal form like `S.r.l.`,
+          company size like `Micro impresa`, role/title like `Legale rappresentante`,
+          contract/account type like `Conto corrente bancario`, duration like
+          `A tempo indeterminato`, ATECO/activity description, CCNL name, general
+          status or exemption notes).
+
         Return a ProfileBase with:
         - template:
-          - If an existing template is provided, adapt to its existing
-            structure, formatting, and indentation style, and integrate any
-            missing information needed for the forms without reformatting
-            existing lines. Preserve existing information, already-selected
-            choices, and exact {placeholder} names. If the existing template
-            contains unresolved [] or [ ] checkbox groups, mark coherent,
-            realistic selections as [x] (and [ ] for unselected ones). If it
-            contains inline [A | B | ...] choices, replace them with a single
-            coherent, realistic value.
-          - For direct identifiers and sensitive text values (e.g. names,
-            VAT/tax codes, addresses, emails, phone numbers, IBANs, ID numbers),
-            use {snake_case} Python format placeholders.
-          - For non-identifying attributes, categories, and facts needed to
-            answer choice checkboxes (e.g. legal form, enterprise size, gender,
-            sector, certifications), write concrete, realistic Italian sample
-            values directly (e.g. "Forma giuridica: S.r.l."), without
-            angle-bracket hints or curly braces { }.
-          - Ignore mandatory "must-accept" declarations and consents where the
-            applicant has no real choice (e.g. no criminal convictions, not in
-            bankruptcy/liquidation, no tax arrears, having read the rules,
-            privacy/GDPR consent), as well as form-specific procedural fields
-            (e.g. signature dates, attachment checklists).
+          - Keep the exact structure, sections, lines, wording, and indentation of
+            the input template unchanged (do not add, remove, reorder, or rename any
+            lines, and do not add or rename any `{placeholder}` tags).
+          - Keep sensitive `{placeholder}` tags intact in `template`.
+          - Replace non-sensitive `{placeholder}` tags inline with their realistic
+            Italian fake values.
+          - Resolve every checkbox in the template so no undefined "[]" remains: make
+            coherent, realistic selections across each checkbox group (not at random),
+            explicitly marking every option as either "[x]" (accepted) or "[ ]" (not
+            accepted).
         - sensitive_data:
-          - Provide a coherent, realistic Italian sample value for every
-            {placeholder} used in template (matching keys exactly).
+          - Provide a coherent, realistic Italian fake value for every `{placeholder}`
+            that remains in `template` (matching keys exactly; do not include keys
+            for placeholders that were replaced inline).
         """
     ),
 )
@@ -683,6 +799,8 @@ def _build_template_prompt_parts(
     template: str = "",
 ) -> list[str | BinaryContent]:
     prompt_parts: list[str | BinaryContent] = []
+    if template.strip():
+        prompt_parts.append(f"Existing profile template:\n{template}")
     for doc_idx, doc in enumerate(docs):
         for page_idx, page in enumerate(doc.pages()):
             prompt_parts.append(f"--- Document {doc_idx}, Page {page_idx} ---")
@@ -690,37 +808,44 @@ def _build_template_prompt_parts(
             prompt_parts.append(
                 BinaryContent(data=pix.tobytes("png"), media_type="image/png")
             )
-    if prompt_parts and template.strip():
-        prompt_parts.insert(0, f"Existing profile template:\n{template}")
     return prompt_parts
 
 
 async def infer_template(
     docs: list[pymupdf.Document], template: str = ""
-) -> ProfileBase:
+) -> TemplateInferrerOutput:
     prompt_parts = _build_template_prompt_parts(docs, template)
     if not prompt_parts:
+        return TemplateInferrerOutput(template="", placeholder_map={})
+
+    try:
+        old_keys = {
+            name for _, name, _, _ in Formatter().parse(template) if name is not None
+        }
+    except ValueError:
+        old_keys = set()
+
+    result = await template_inferrer.run(
+        prompt_parts, deps=TemplateInferrerDeps(old_keys=old_keys)
+    )
+    return result.output
+
+
+async def fill_profile_demo(template: str) -> ProfileBase:
+    if not template.strip():
         return ProfileBase(template="", sensitive_data={})
 
-    result = await template_inferrer.run(prompt_parts)
-    inferred_template = result.output
-    sensitive_data = {
-        field_name: ""
-        for _, field_name, _, _ in Formatter().parse(inferred_template)
+    result = await profile_filler_demo.run(f"Profile template:\n{template}")
+    output = result.output
+    remaining_keys = {
+        field_name.split(".")[0].split("[")[0]
+        for _, field_name, _, _ in Formatter().parse(output.template)
         if field_name is not None
     }
-    return ProfileBase(template=inferred_template, sensitive_data=sensitive_data)
-
-
-async def infer_template_demo(
-    docs: list[pymupdf.Document], template: str = ""
-) -> ProfileBase:
-    prompt_parts = _build_template_prompt_parts(docs, template)
-    if not prompt_parts:
-        return ProfileBase(template="", sensitive_data={})
-
-    result = await template_inferrer_demo.run(prompt_parts)
-    return result.output
+    output.sensitive_data = {
+        k: v for k, v in output.sensitive_data.items() if k in remaining_keys
+    }
+    return output
 
 
 # AIGEN ADD END

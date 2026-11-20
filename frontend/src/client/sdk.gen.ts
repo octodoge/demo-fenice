@@ -2,7 +2,7 @@
 
 import { type Client, formDataBodySerializer, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { documentsUploadDocumentData, documentsUploadDocumentErrors, documentsUploadDocumentResponses, itemsCreateItemData, itemsCreateItemErrors, itemsCreateItemResponses, itemsDeleteItemData, itemsDeleteItemErrors, itemsDeleteItemResponses, itemsReadItemData, itemsReadItemErrors, itemsReadItemResponses, itemsReadItemsData, itemsReadItemsErrors, itemsReadItemsResponses, itemsUpdateItemData, itemsUpdateItemErrors, itemsUpdateItemResponses, loginLoginAccessTokenData, loginLoginAccessTokenErrors, loginLoginAccessTokenResponses, loginRecoverPasswordData, loginRecoverPasswordErrors, loginRecoverPasswordHtmlContentData, loginRecoverPasswordHtmlContentErrors, loginRecoverPasswordHtmlContentResponses, loginRecoverPasswordResponses, loginResetPasswordData, loginResetPasswordErrors, loginResetPasswordResponses, loginTestTokenData, loginTestTokenResponses, privateCreateUserData, privateCreateUserErrors, privateCreateUserResponses, profileInferProfileTemplateData, profileInferProfileTemplateErrors, profileInferProfileTemplateResponses, profileReadProfileData, profileReadProfileResponses, profileReplaceProfileData, profileReplaceProfileErrors, profileReplaceProfileResponses, usersCreateUserData, usersCreateUserErrors, usersCreateUserResponses, usersDeleteUserData, usersDeleteUserErrors, usersDeleteUserMeData, usersDeleteUserMeResponses, usersDeleteUserResponses, usersReadUserByIdData, usersReadUserByIdErrors, usersReadUserByIdResponses, usersReadUserMeData, usersReadUserMeResponses, usersReadUsersData, usersReadUsersErrors, usersReadUsersResponses, usersRegisterUserData, usersRegisterUserErrors, usersRegisterUserResponses, usersUpdatePasswordMeData, usersUpdatePasswordMeErrors, usersUpdatePasswordMeResponses, usersUpdateUserData, usersUpdateUserErrors, usersUpdateUserMeData, usersUpdateUserMeErrors, usersUpdateUserMeResponses, usersUpdateUserResponses, utilsHealthCheckData, utilsHealthCheckResponses, utilsTestEmailData, utilsTestEmailErrors, utilsTestEmailResponses } from './types.gen';
+import type { documentsUploadDocumentData, documentsUploadDocumentErrors, documentsUploadDocumentResponses, itemsCreateItemData, itemsCreateItemErrors, itemsCreateItemResponses, itemsDeleteItemData, itemsDeleteItemErrors, itemsDeleteItemResponses, itemsReadItemData, itemsReadItemErrors, itemsReadItemResponses, itemsReadItemsData, itemsReadItemsErrors, itemsReadItemsResponses, itemsUpdateItemData, itemsUpdateItemErrors, itemsUpdateItemResponses, loginLoginAccessTokenData, loginLoginAccessTokenErrors, loginLoginAccessTokenResponses, loginRecoverPasswordData, loginRecoverPasswordErrors, loginRecoverPasswordHtmlContentData, loginRecoverPasswordHtmlContentErrors, loginRecoverPasswordHtmlContentResponses, loginRecoverPasswordResponses, loginResetPasswordData, loginResetPasswordErrors, loginResetPasswordResponses, loginTestTokenData, loginTestTokenResponses, privateCreateUserData, privateCreateUserErrors, privateCreateUserResponses, profileFillDemoProfileData, profileFillDemoProfileErrors, profileFillDemoProfileResponses, profileInferProfileTemplateData, profileInferProfileTemplateErrors, profileInferProfileTemplateResponses, profileReadProfileData, profileReadProfileResponses, profileReplaceProfileData, profileReplaceProfileErrors, profileReplaceProfileResponses, usersCreateUserData, usersCreateUserErrors, usersCreateUserResponses, usersDeleteUserData, usersDeleteUserErrors, usersDeleteUserMeData, usersDeleteUserMeResponses, usersDeleteUserResponses, usersReadUserByIdData, usersReadUserByIdErrors, usersReadUserByIdResponses, usersReadUserMeData, usersReadUserMeResponses, usersReadUsersData, usersReadUsersErrors, usersReadUsersResponses, usersRegisterUserData, usersRegisterUserErrors, usersRegisterUserResponses, usersUpdatePasswordMeData, usersUpdatePasswordMeErrors, usersUpdatePasswordMeResponses, usersUpdateUserData, usersUpdateUserErrors, usersUpdateUserMeData, usersUpdateUserMeErrors, usersUpdateUserMeResponses, usersUpdateUserResponses, utilsHealthCheckData, utilsHealthCheckResponses, utilsTestEmailData, utilsTestEmailErrors, utilsTestEmailResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -418,10 +418,10 @@ export class ProfileService {
     /**
      * Infer Profile Template
      *
-     * Infer a profile template and sensitive data keys from example PDF forms.
+     * Infer or refactor a profile template and placeholder substitution map.
      */
-    public static inferProfileTemplate<ThrowOnError extends boolean = true>(options: Options<profileInferProfileTemplateData, ThrowOnError>) {
-        return (options.client ?? client).post<profileInferProfileTemplateResponses, profileInferProfileTemplateErrors, ThrowOnError>({
+    public static inferProfileTemplate<ThrowOnError extends boolean = true>(options?: Options<profileInferProfileTemplateData, ThrowOnError>) {
+        return (options?.client ?? client).post<profileInferProfileTemplateResponses, profileInferProfileTemplateErrors, ThrowOnError>({
             ...formDataBodySerializer,
             responseType: 'json',
             security: [{ scheme: 'bearer', type: 'http' }],
@@ -429,6 +429,26 @@ export class ProfileService {
             ...options,
             headers: {
                 'Content-Type': null,
+                ...options?.headers
+            }
+        });
+    }
+    
+    /**
+     * Fill Demo Profile
+     *
+     * Populate a profile template with coherent, realistic fake data, keeping
+     * sensitive placeholders in sensitive_data and inlining non-sensitive values.
+     */
+    public static fillDemoProfile<ThrowOnError extends boolean = true>(options: Options<profileFillDemoProfileData, ThrowOnError>) {
+        return (options.client ?? client).post<profileFillDemoProfileResponses, profileFillDemoProfileErrors, ThrowOnError>({
+            ...urlSearchParamsBodySerializer,
+            responseType: 'json',
+            security: [{ scheme: 'bearer', type: 'http' }],
+            url: '/api/v1/profile/fill-demo',
+            ...options,
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
                 ...options.headers
             }
         });

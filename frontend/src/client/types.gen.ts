@@ -45,13 +45,23 @@ export type Body_login_login_access_token = {
 };
 
 /**
+ * Body_profile-fill_demo_profile
+ */
+export type Body_profile_fill_demo_profile = {
+    /**
+     * Template
+     */
+    template: string;
+};
+
+/**
  * Body_profile-infer_profile_template
  */
 export type Body_profile_infer_profile_template = {
     /**
      * Files
      */
-    files: Array<Blob | File>;
+    files?: Array<Blob | File>;
     /**
      * Template
      */
@@ -236,6 +246,26 @@ export type ProfilePublic = {
      * Created At
      */
     created_at?: string | null;
+};
+
+/**
+ * TemplateInferrerOutput
+ */
+export type TemplateInferrerOutput = {
+    /**
+     * Template
+     *
+     * The inferred or refactored profile template.
+     */
+    template: string;
+    /**
+     * Placeholder Map
+     *
+     * Map of old placeholder names to new placeholder names (without curly braces) when placeholders from an existing template are renamed to follow the naming rules (e.g. {'nome_del_dichiarante': 'dichiarante_nome'}).
+     */
+    placeholder_map?: {
+        [key: string]: string;
+    };
 };
 
 /**
@@ -1068,14 +1098,9 @@ export type profileReplaceProfileResponses = {
 export type profileReplaceProfileResponse = profileReplaceProfileResponses[keyof profileReplaceProfileResponses];
 
 export type profileInferProfileTemplateData = {
-    body: Body_profile_infer_profile_template;
+    body?: Body_profile_infer_profile_template;
     path?: never;
-    query?: {
-        /**
-         * Demo
-         */
-        demo?: boolean;
-    };
+    query?: never;
     url: '/api/v1/profile/infer-template';
 };
 
@@ -1092,10 +1117,35 @@ export type profileInferProfileTemplateResponses = {
     /**
      * Successful Response
      */
-    200: ProfileBase;
+    200: TemplateInferrerOutput;
 };
 
 export type profileInferProfileTemplateResponse = profileInferProfileTemplateResponses[keyof profileInferProfileTemplateResponses];
+
+export type profileFillDemoProfileData = {
+    body: Body_profile_fill_demo_profile;
+    path?: never;
+    query?: never;
+    url: '/api/v1/profile/fill-demo';
+};
+
+export type profileFillDemoProfileErrors = {
+    /**
+     * Validation Error
+     */
+    422: HTTPValidationError;
+};
+
+export type profileFillDemoProfileError = profileFillDemoProfileErrors[keyof profileFillDemoProfileErrors];
+
+export type profileFillDemoProfileResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProfileBase;
+};
+
+export type profileFillDemoProfileResponse = profileFillDemoProfileResponses[keyof profileFillDemoProfileResponses];
 
 export type privateCreateUserData = {
     body: PrivateUserCreate;
