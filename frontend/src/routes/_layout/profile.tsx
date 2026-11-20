@@ -453,7 +453,7 @@ function InferTemplateDialog({
         <FileUpload
           accept=".pdf"
           maxFiles={5}
-          maxSize={5 * 1024 * 1024}
+          maxSize={4 * 1024 * 1024}
           className="w-full min-w-0"
           value={files}
           onValueChange={setFiles}
@@ -471,7 +471,7 @@ function InferTemplateDialog({
                 Or click to browse
               </p>
               <p className="text-xs text-muted-foreground">
-                PDF only · Max 5 files · Up to 5MB each
+                PDF only · Max 5 files · Up to 4MB each
               </p>
             </div>
             <FileUploadTrigger asChild>

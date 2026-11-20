@@ -51,6 +51,7 @@ def replace_profile(
     return profile
 
 
+# TODO: may be better to keep PDFs here, not convert to images.
 @router.post("/infer-template", response_model=TemplateInferrerOutput)
 async def infer_profile_template(
     current_user: CurrentUser,  # noqa: ARG001

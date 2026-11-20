@@ -443,8 +443,13 @@ value_inferrer = Agent(
         - Text widgets: return the text to fill in. You may use the exact
           {placeholder} tags from the profile as Python format placeholders
           (e.g. "{company_name} - {vat_number}"). Escape literal braces as {{ }}.
-          For multi-line areas split across consecutive single-line widgets,
-          wrap long text across them to fit each line's width.
+          Be mindful of each widget's available space in the image: if a box is
+          narrow or small, condense, abbreviate, or reformulate non-sensitive text
+          to fit cleanly while keeping essential meaning (e.g. "MI" instead of
+          "Milano", "Leg. rappr." instead of "Legale rappresentante", "V.le" /
+          "P.zza" instead of "Viale" / "Piazza", or short date formats). For multi-line areas split across
+          consecutive single-line widgets, wrap long text across them to fit each
+          line's width.
         - Checkboxes: return true or false. Always return true for mandatory
           "must-accept" declarations and consents where the applicant has no
           real choice (e.g. no criminal convictions, not in
@@ -639,10 +644,10 @@ class TemplateInferrerDeps:
 
 template_inferrer = Agent(
     GoogleModel(
-        "gemini-3.8-flash",
+        "gemini-4-carbon",
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
-    model_settings=GoogleModelSettings(thinking="medium"),
+    model_settings=GoogleModelSettings(thinking="high"),  # TODO: high?
     output_type=TemplateInferrerOutput,
     deps_type=TemplateInferrerDeps,
     validation_context=lambda ctx: ctx.deps,
@@ -681,6 +686,7 @@ template_inferrer = Agent(
         ```
         DATI DEL DICHIARANTE
         - Nome: {dichiarante_nome}
+        - Cognome: {dichiarante_cognome}
         - Nascita:
           - Data: {dichiarante_nascita_data}
           - Luogo: {dichiarante_nascita_luogo}
@@ -690,8 +696,15 @@ template_inferrer = Agent(
               - Data procura: {dichiarante_qualifica_data}
         ```
 
-        ### 2. Placeholders vs. Checkboxes
+        ### 2. Placeholders vs. Checkboxes & Granularity
         Use common sense based on how real PDF forms collect each piece of data:
+        - **Granularity**: prefer atomic, fine-grained fields over coarse composite
+          ones—split composite data into its natural components (e.g. separate
+          `Nome` and `Cognome` instead of a single full name; separate `Indirizzo`,
+          `Numero civico`, `Comune`, `Provincia`, and `CAP` instead of a single
+          address; separate `Data`, `Luogo`, and `Provincia` for birth or
+          registration details) so both split and combined form fields can be
+          populated unambiguously.
         - **Placeholders (`{placeholder}`)**: use for text inputs. Users either
           replace a placeholder inline with non-sensitive text or keep it and store
           the value in the sensitive data dictionary.
@@ -719,18 +732,40 @@ template_inferrer = Agent(
           - Never include catch-all `"[] ..."` or blank `"[]"` options.
 
         ### 3. Refactoring & Merging an Existing Template
-        - Refactor the entire template so it strictly conforms to all structure,
-          indentation, checkbox, and placeholder naming rules above, while
-          integrating any missing fields from the provided PDFs.
-        - Preserve all existing information and already-filled non-sensitive text.
-        - Preserve existing user choices as `"[x]"` (accepted) or `"[ ]"` (not
-          accepted)—including when converting previously resolved choices into
-          checkboxes—while keeping unanswered or newly added options as `"[]"`.
-        - Whenever an existing `{placeholder}` is renamed to comply with the naming
-          rules (e.g. `{nome_del_dichiarante}` -> `{dichiarante_nome}`), record the
-          mapping in `placeholder_map` using bare identifier names without braces
-          (e.g. `{"nome_del_dichiarante": "dichiarante_nome"}`) so existing
-          sensitive data can be migrated without loss.
+        - **Re-elaborate the whole template holistically (do not just append)**:
+          Treat the existing template and the provided PDFs as a single unified
+          set of requirements and redesign the entire template structure to be as
+          clean, schematic, general, and non-redundant as if built from scratch.
+          Never lazily tack new fields or sections onto the existing template when
+          existing sections, bullets, or representations should be reorganized,
+          merged, split, or generalized to accommodate the combined information.
+        - **Eliminate all redundancy**: Actively deduplicate and unify
+          overlapping fields or concepts across the existing template and the
+          new PDFs into a single canonical representation, rather than keeping
+          separate/redundant entries just to avoid altering existing lines.
+        - **Prioritize the best structure over preserving old choices**:
+          - Strictly enforce all structure, indentation, checkbox, and placeholder
+            naming rules above across the entire output.
+          - Re-evaluate every field's representation (`{placeholder}` vs.
+            checkboxes vs. nested sub-fields) in light of all inputs combined.
+          - If integrating new PDFs makes an open `{placeholder}` cleaner or more
+            general than an existing checkbox group (e.g. options became too
+            numerous, varied, or open-ended), convert it to a `{placeholder}`—even
+            at the cost of discarding the previous checkbox choices.
+          - When an existing checkbox group or resolved choice remains the right
+            representation, preserve existing user choices as `"[x]"` (accepted)
+            or `"[ ]"` (not accepted)—including when converting previously
+            resolved choices into checkboxes—while keeping unanswered or newly
+            added options as `"[]"`.
+        - **Preserve data & map renamed placeholders**:
+          - Preserve existing information and already-filled non-sensitive text
+            within the newly refactored structure (without duplicating it).
+          - Whenever an existing `{placeholder}` is renamed or consolidated
+            during refactoring (e.g. `{nome_del_dichiarante}` ->
+            `{dichiarante_nome}`), record the mapping in `placeholder_map` using
+            bare identifier names without braces (e.g.
+            `{"nome_del_dichiarante": "dichiarante_nome"}`) so existing sensitive
+            data can be migrated without loss.
 
         ### 4. Exclusions
         - Ignore mandatory "must-accept" declarations and consents where the
@@ -757,28 +792,43 @@ profile_filler_demo = Agent(
         Populate the profile with coherent, realistic Italian fake data without
         restructuring the template.
 
-        Distinguish between sensitive and non-sensitive {placeholder} tags:
-        - **Sensitive data** (keep as `{placeholder}` in `template` and put the fake
+        Leave as much non-sensitive information visible in `template` as possible,
+        storing in `sensitive_data` **only** the truly sensitive core:
+        - **Sensitive data** (keep `{placeholder}` in `template` and put the fake
           value in `sensitive_data`): personal or identifying details, contact info,
-          tax/ID codes, dates/places of birth, addresses, bank/IBAN details,
-          registration/policy/matricola numbers, and similar confidential fields
-          (e.g. `{dichiarante_nome}`, `{dichiarante_cf}`, `{impresa_piva}`,
+          tax/ID codes, dates/places of birth, street names/numbers, bank/IBAN
+          details, registration/policy/matricola numbers, and similar confidential
+          fields (e.g. `{dichiarante_nome}`, `{dichiarante_cf}`, `{impresa_piva}`,
           `{impresa_sede_indirizzo}`, `{impresa_pec}`, `{banca_iban}`).
-        - **Non-sensitive data** (replace the `{placeholder}` directly inline in
+          - **Surface non-sensitive prefixes/qualifiers inline**: when a sensitive
+            value naturally includes a generic, non-sensitive prefix, qualifier, or
+            label, write that non-sensitive text directly in `template` around the
+            `{placeholder}` and store only the sensitive part in `sensitive_data`
+            (e.g. write `Via {impresa_sede_indirizzo}` with `impresa_sede_indirizzo:
+            "Noncello"` instead of keeping `"Via Noncello"` in `sensitive_data`;
+            write `Tribunale di {impresa_tribunale_sede}` with
+            `impresa_tribunale_sede: "Milano"` instead of `"Tribunale di Milano"`;
+            write `Agenzia delle Entrate di {agenzia_entrate_ufficio}` with
+            `agenzia_entrate_ufficio: "Roma 1"` instead of `"Agenzia delle Entrate
+            di Roma 1"`).
+        - **Non-sensitive data** (replace the `{placeholder}` completely inline in
           `template` with the realistic Italian fake value, and omit it from
           `sensitive_data`): general, categorical, or descriptive info that does not
           identify or expose sensitive details (e.g. legal form like `S.r.l.`,
           company size like `Micro impresa`, role/title like `Legale rappresentante`,
           contract/account type like `Conto corrente bancario`, duration like
           `A tempo indeterminato`, ATECO/activity description, CCNL name, general
-          status or exemption notes).
+          status or exemption notes, or non-identifying broad values like `Italia`).
 
         Return a ProfileBase with:
         - template:
           - Keep the exact structure, sections, lines, wording, and indentation of
             the input template unchanged (do not add, remove, reorder, or rename any
-            lines, and do not add or rename any `{placeholder}` tags).
-          - Keep sensitive `{placeholder}` tags intact in `template`.
+            lines, and do not add or rename any `{placeholder}` tags; only inline
+            non-sensitive values or surface non-sensitive prefixes/qualifiers around
+            sensitive `{placeholder}` tags).
+          - Keep sensitive `{placeholder}` tags intact in `template` (with any
+            non-sensitive prefix/qualifier surfaced inline outside the braces).
           - Replace non-sensitive `{placeholder}` tags inline with their realistic
             Italian fake values.
           - Resolve every checkbox in the template so no undefined "[]" remains: make
@@ -789,6 +839,9 @@ profile_filler_demo = Agent(
           - Provide a coherent, realistic Italian fake value for every `{placeholder}`
             that remains in `template` (matching keys exactly; do not include keys
             for placeholders that were replaced inline).
+          - Keep `sensitive_data` values as short and compact as realistically
+            possible (e.g. short names, short street names, short emails/PECs,
+            concise codes) so they fit comfortably even in tight PDF form fields.
         """
     ),
 )

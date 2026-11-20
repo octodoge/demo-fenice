@@ -61,8 +61,8 @@ export function Dropzone({ files, setFiles, statuses }: DropzoneProps) {
   return (
     <FileUpload
       accept=".pdf"
-      maxFiles={2}
-      maxSize={5 * 1024 * 1024}
+      maxFiles={10}
+      maxSize={4 * 1024 * 1024}
       className="w-full max-w-md mx-auto"
       value={files}
       onValueChange={setFiles}
@@ -78,7 +78,7 @@ export function Dropzone({ files, setFiles, statuses }: DropzoneProps) {
           <p className="text-sm font-medium">Drag & drop files here</p>
           <p className="text-xs text-muted-foreground">Or click to browse</p>
           <p className="text-xs text-muted-foreground">
-            PDF only · Max 2 files · Up to 5MB each
+            PDF only · Max 10 files · Up to 4MB each
           </p>
         </div>
         <FileUploadTrigger asChild>
