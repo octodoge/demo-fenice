@@ -1,9 +1,7 @@
 # AIGEN ADD START
 
-from contextlib import ExitStack
 from typing import Annotated, Any
 
-import pymupdf
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from sqlmodel import select
 
@@ -51,7 +49,6 @@ def replace_profile(
     return profile
 
 
-# TODO: may be better to keep PDFs here, not convert to images.
 @router.post("/infer-template", response_model=TemplateInferrerOutput)
 async def infer_profile_template(
     current_user: CurrentUser,  # noqa: ARG001
@@ -64,18 +61,16 @@ async def infer_profile_template(
     if not files and not template.strip():
         raise HTTPException(status_code=422, detail="No PDF files or template provided")
 
-    with ExitStack() as stack:
-        docs: list[pymupdf.Document] = []
-        for file in files:
-            if not file.filename:
-                raise HTTPException(status_code=422, detail="Invalid PDF filename")
-            content = await file.read()
-            if not content.startswith(b"%PDF-"):
-                raise HTTPException(status_code=422, detail="Invalid PDF content")
-            doc = stack.enter_context(pymupdf.open(stream=content, filetype="pdf"))
-            docs.append(doc)
+    pdfs: list[bytes] = []
+    for file in files:
+        if not file.filename:
+            raise HTTPException(status_code=422, detail="Invalid PDF filename")
+        content = await file.read()
+        if not content.startswith(b"%PDF-"):
+            raise HTTPException(status_code=422, detail="Invalid PDF content")
+        pdfs.append(content)
 
-        return await infer_template(docs, template)
+    return await infer_template(pdfs, template)
 
 
 @router.post("/fill-demo", response_model=ProfileBase)

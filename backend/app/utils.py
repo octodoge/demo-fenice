@@ -162,6 +162,10 @@ def verify_password_reset_token(token: str) -> str | None:
         return None
 
 
+# AIGEN REFS
+"""
+Choosing a LLM: https://aistudio.google.com/docs/choosing-a-model
+"""
 # AIGEN ADD START
 
 
@@ -221,12 +225,12 @@ class DetectorDeps:
 
 widget_detector = Agent(
     GoogleModel(
-        "gemini-4-carbon",  # TODO: gemini-3.8-flash?
+        "gemini-4-carbon",  # Carbon sota now for objDec. Use faster only if same result
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
     model_settings=GoogleModelSettings(
-        thinking="low"
-    ),  # low instead of medium solved drift once with gemini 3.8
+        thinking="low"  # no need to think at all here (is a waste of time and money)
+    ),
     output_type=list[MissingWidget],
     deps_type=DetectorDeps,
     validation_context=lambda ctx: ctx.deps,
@@ -255,7 +259,9 @@ widget_detector = Agent(
 
 
 # TODO: in final product would be better to process all pages in parallel (slightly
-# higher cost but faster and less error prone for the model)
+# higher cost but faster and less error prone for the model). but we should give context
+# about last sentences in prev page IMO to catch edge cases. Or maybe do it only if 4+
+# pages to avoid creating too many request that may end up being queued
 async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
     if len(doc) == 0:
         return []
@@ -287,6 +293,7 @@ SIGNATURE_HALF_H: float = 32 / 2
 SIGNATURE_HALF_W: float = SIGNATURE_HALF_H * 2
 
 
+# TODO: adjust
 def postprocess_missing_widgets(
     doc: pymupdf.Document, widgets: list[MissingWidget]
 ) -> list[MissingWidgetPost]:
@@ -426,7 +433,7 @@ def label_widgets(doc: pymupdf.Document) -> None:
 
 value_inferrer = Agent(
     GoogleModel(
-        "gemini-3.8-flash",
+        "gemini-4-hydrogen",  # must be fast with medium thinking
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
     model_settings=GoogleModelSettings(thinking="medium"),
@@ -644,18 +651,18 @@ class TemplateInferrerDeps:
 
 template_inferrer = Agent(
     GoogleModel(
-        "gemini-4-carbon",
+        "gemini-4-neon",  # harder than value_inferrer +prefer to keep thinking medium
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
-    model_settings=GoogleModelSettings(thinking="high"),  # TODO: high?
+    model_settings=GoogleModelSettings(thinking="medium"),
     output_type=TemplateInferrerOutput,
     deps_type=TemplateInferrerDeps,
     validation_context=lambda ctx: ctx.deps,
     instructions=cleandoc(
         """
-        You will receive images of pages from one or more PDF forms, an existing
-        profile template, or both (PDFs only to build from scratch, a template only
-        to refactor, or both to refactor and expand).
+        You will receive one or more PDF forms, an existing profile template, or both
+        (PDFs only to build from scratch, a template only to refactor, or both to
+        refactor and expand).
 
         Your goal is to produce a schematic, general, reusable profile template in
         Italian that generalizes the information required across all provided PDFs
@@ -780,7 +787,7 @@ template_inferrer = Agent(
 
 profile_filler_demo = Agent(
     GoogleModel(
-        "gemini-3.8-flash",
+        "gemini-4-hydrogen",
         provider=GoogleProvider(api_key=ai_studio_api_key),
     ),
     model_settings=GoogleModelSettings(thinking="medium"),
@@ -848,26 +855,22 @@ profile_filler_demo = Agent(
 
 
 def _build_template_prompt_parts(
-    docs: list[pymupdf.Document],
+    pdfs: list[bytes],
     template: str = "",
 ) -> list[str | BinaryContent]:
     prompt_parts: list[str | BinaryContent] = []
     if template.strip():
         prompt_parts.append(f"Existing profile template:\n{template}")
-    for doc_idx, doc in enumerate(docs):
-        for page_idx, page in enumerate(doc.pages()):
-            prompt_parts.append(f"--- Document {doc_idx}, Page {page_idx} ---")
-            pix = page.get_pixmap(dpi=150)
-            prompt_parts.append(
-                BinaryContent(data=pix.tobytes("png"), media_type="image/png")
-            )
+    for pdf_idx, pdf in enumerate(pdfs):
+        prompt_parts.append(f"--- Document {pdf_idx} ---")
+        prompt_parts.append(BinaryContent(data=pdf, media_type="application/pdf"))
     return prompt_parts
 
 
 async def infer_template(
-    docs: list[pymupdf.Document], template: str = ""
+    pdfs: list[bytes], template: str = ""
 ) -> TemplateInferrerOutput:
-    prompt_parts = _build_template_prompt_parts(docs, template)
+    prompt_parts = _build_template_prompt_parts(pdfs, template)
     if not prompt_parts:
         return TemplateInferrerOutput(template="", placeholder_map={})
 
