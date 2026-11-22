@@ -41,15 +41,14 @@ async def upload_document(session: SessionDep, file: UploadFile) -> PDFResponse:
 
     with pymupdf.open(stream=content, filetype="pdf") as doc:
         clean_malformed_widgets(doc)
-        with pymupdf.open() as doc_copy:
-            doc_copy.insert_pdf(doc)
+        # Document.insert_pdf() is bugged (changes source file), cannot be used to copy
+        with pymupdf.open(stream=doc.tobytes(), filetype="pdf") as doc_copy:
             highlight_widgets(doc_copy)
             missing_widgets = await detect_missing_widgets(doc_copy)
         missing_widgets_post = postprocess_missing_widgets(doc, missing_widgets)
         add_missing_widgets(doc, missing_widgets_post)
         profile = get_profile(session)
-        with pymupdf.open() as doc_copy:
-            doc_copy.insert_pdf(doc)
+        with pymupdf.open(stream=doc.tobytes(), filetype="pdf") as doc_copy:
             label_widgets(doc_copy)
             values = await infer_values(doc_copy, profile)
         if values is not None:

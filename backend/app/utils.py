@@ -284,8 +284,8 @@ class MissingWidgetPost(BaseModel):
     type: int
 
 
-TEXT_HEIGHT: float = 16
-LEFT_MARGIN: float = 4
+TEXT_HEIGHT: float = 12
+LEFT_MARGIN: float = 1
 MIN_TEXT_WIDTH: float = TEXT_HEIGHT
 CHECKBOX_HALF_H: float = 12 / 2
 CHECKBOX_HALF_W: float = CHECKBOX_HALF_H
