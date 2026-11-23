@@ -294,8 +294,9 @@ class MissingWidgetPost(BaseModel):
     is_multiline: bool = False
 
 
-TEXT_HEIGHT: float = 12
+TEXT_HEIGHT: float = 8
 LEFT_MARGIN: float = 1
+BOTTOM_MARGIN: float = 1
 MIN_TEXT_WIDTH: float = TEXT_HEIGHT
 MULTILINE_MARGIN: float = 0.5
 CHECKBOX_HALF_H: float = 12 / 2
@@ -327,7 +328,7 @@ def postprocess_missing_widgets(
         x_center = (x0 + x1) / 2
 
         if widget.type == "text":
-            y1 = max(TEXT_HEIGHT, y1)
+            y1 = max(TEXT_HEIGHT, y1 - BOTTOM_MARGIN)
             y0 = y1 - TEXT_HEIGHT
             x0 = min(x0 + LEFT_MARGIN, page.rect.width - MIN_TEXT_WIDTH)
             x1 = max(x0 + MIN_TEXT_WIDTH, x1)
@@ -413,7 +414,7 @@ def _identify_widgets(page: pymupdf.Page) -> dict[str, pymupdf.Widget]:
 def label_widgets(doc: pymupdf.Document) -> None:
 
     # font size
-    badge_h: float = 10
+    badge_h: float = 8
     padding: float = 1
     fontname: str = "helv"
     font = pymupdf.Font(fontname)
@@ -627,13 +628,13 @@ def _fill_multiline_widget(
         tw.field_value = "A"
         tmp_page.add_widget(tw)
         tw = next(tmp_page.widgets())
+        tw.border_width = widget.border_width
         tw.update()
         fontsize = float(
             tmp_page.get_text("dict")["blocks"][0]["lines"][0]["spans"][0]["size"]
         )
 
         tw.rect = target_rect
-        tw.border_width = widget.border_width
         tw.field_flags = pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE
         tw.update(sync_flags=True)
         margin = float(tmp_page.get_text("words", flags=0)[0][0])
@@ -686,6 +687,8 @@ def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None
                 widget.update()
             elif isinstance(val, str):
                 text = val.format(**profile.sensitive_data)
+                if not widget.border_color:
+                    widget.border_width = 0
                 if (
                     widget.field_flags & pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE
                     and widget.text_fontsize == 0
