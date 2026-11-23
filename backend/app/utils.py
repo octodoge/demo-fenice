@@ -389,6 +389,8 @@ def add_missing_widgets(
         widget = pymupdf.Widget()
         widget.rect = rect
         widget.field_type = missing_widget.type
+        if missing_widget.type == pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT:
+            widget.text_font = "Helv"
         if missing_widget.is_multiline:
             widget.field_flags |= pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE
         widget.field_name = f"missing_widget_{missing_widget.page}_{idx}"
