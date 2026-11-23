@@ -24,6 +24,7 @@ from itertools import product
 from pathlib import Path
 from string import Formatter, ascii_uppercase
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
 
 import emails
 import jwt
@@ -196,8 +197,8 @@ class MissingWidget(BaseModel):
             "[ymin, xmin, ymax, xmax] normalized to 0-1000."
         ),
     )
-    # TODO: adapt all code: drop "signature" and handle multiline text on top of "text"
-    type: Literal["text", "checkbox", "signature"] = Field(
+    # TODO: adapt all code: drop "signature"
+    type: Literal["text", "multiline_text", "checkbox", "signature"] = Field(
         description="The type of the missing widget."
     )
 
@@ -243,16 +244,22 @@ widget_detector = Agent(
         checkboxes, etc.) not showing red borders are missing a widget (they are not
         interactive).
         Often, all widgets are missing, so no red borders are present at all.
-        Detect all missing widgets of type "text", "checkbox" and "signature", if any
-        (ignore other types).
+        Detect all missing widgets of type "text", "multiline_text", "checkbox" and
+        "signature", if any (ignore other types).
         This includes specifying for each missing widget a 2D box that would bound it if
         inserted.
         Each image has its own independent box coordinate system (with y=0 at the top),
         so never use cumulative coordinates across images.
-        For "text" widgets, ensure that:
+        For "text" (single-line) widgets, ensure that:
         * The bottom of the box rests along the underline or the text baseline.
         * The box starts strictly after any label or colon, never overlapping text.
         * The box spans the full input area.
+        For "multiline_text" widgets:
+        * Use for tall open rectangular boxes or blank areas expecting multiple lines
+          of text (for stacked horizontal underlines, use separate "text" widgets
+          instead, one per line).
+        * Bound the full empty interior of the box without overlapping its borders or
+          any header/label text.
         """
     ),
 )
@@ -262,8 +269,6 @@ widget_detector = Agent(
 # higher cost but faster and less error prone for the model). but we should give context
 # about last sentences in prev page IMO to catch edge cases. Or maybe do it only if 4+
 # pages to avoid creating too many request that may end up being queued
-# RECAP: leave existing widgets as they are. when filling multiline widgets, find min
-# font size that fit the text
 
 
 async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
@@ -286,27 +291,25 @@ class MissingWidgetPost(BaseModel):
     page: int
     rect: list[float]
     type: int
+    is_multiline: bool = False
 
 
-# TODO: would be better to fix font and fontsize so editor must use the same
-# (because each editor do what it wants actually, so at least have same size)
-# also for multiline. we loose autofitting (text is cropped) but ok imo (just use
-# small font and proper agent instruction to minimize occurrences)
-TEXT_HEIGHT: float = 14
+TEXT_HEIGHT: float = 12
 LEFT_MARGIN: float = 1
 MIN_TEXT_WIDTH: float = TEXT_HEIGHT
+MULTILINE_MARGIN: float = 0.5
 CHECKBOX_HALF_H: float = 12 / 2
 CHECKBOX_HALF_W: float = CHECKBOX_HALF_H
 SIGNATURE_HALF_H: float = 32 / 2
 SIGNATURE_HALF_W: float = SIGNATURE_HALF_H * 2
 
 
-# TODO: adjust
 def postprocess_missing_widgets(
     doc: pymupdf.Document, widgets: list[MissingWidget]
 ) -> list[MissingWidgetPost]:
     type_map = {
         "text": pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT,
+        "multiline_text": pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT,
         "checkbox": pymupdf.mupdf.PDF_WIDGET_TYPE_CHECKBOX,
         "signature": pymupdf.mupdf.PDF_WIDGET_TYPE_SIGNATURE,
     }
@@ -328,6 +331,19 @@ def postprocess_missing_widgets(
             y0 = y1 - TEXT_HEIGHT
             x0 = min(x0 + LEFT_MARGIN, page.rect.width - MIN_TEXT_WIDTH)
             x1 = max(x0 + MIN_TEXT_WIDTH, x1)
+
+        elif widget.type == "multiline_text":
+            x0 = min(x0 + MULTILINE_MARGIN, page.rect.width - MIN_TEXT_WIDTH)
+            x1 = max(x0 + MIN_TEXT_WIDTH, x1 - MULTILINE_MARGIN)
+            y0_in = y0 + MULTILINE_MARGIN
+            y1_in = y1 - MULTILINE_MARGIN
+            if y1_in - y0_in < TEXT_HEIGHT:
+                half_h = TEXT_HEIGHT / 2
+                y_center = min(max(half_h, y_center), page.rect.height - half_h)
+                y0 = y_center - half_h
+                y1 = y_center + half_h
+            else:
+                y0, y1 = y0_in, y1_in
 
         elif widget.type == "checkbox":
             y_center = min(
@@ -358,6 +374,7 @@ def postprocess_missing_widgets(
                 page=widget.page,
                 rect=[x0, y0, x1, y1],
                 type=type_map[widget.type],
+                is_multiline=widget.type == "multiline_text",
             )
         )
     return result
@@ -372,6 +389,8 @@ def add_missing_widgets(
         widget = pymupdf.Widget()
         widget.rect = rect
         widget.field_type = missing_widget.type
+        if missing_widget.is_multiline:
+            widget.field_flags |= pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE
         widget.field_name = f"missing_widget_{missing_widget.page}_{idx}"
         page.add_widget(widget)
 
@@ -412,10 +431,15 @@ def label_widgets(doc: pymupdf.Document) -> None:
         pymupdf.mupdf.PDF_WIDGET_TYPE_CHECKBOX: (0.0, 0.2, 0.65),  # dark blue
         pymupdf.mupdf.PDF_WIDGET_TYPE_SIGNATURE: (0.0, 0.5, 0.15),  # dark green
     }
+    multiline_color = (0.85, 0.4, 0.0)  # dark orange
     for page, page_lookup in zip(doc.pages(), lookup, strict=True):
         for id, widget in page_lookup.items():
             assert widget.rect is not None
-            color = colors[widget.field_type]
+            is_multiline = (
+                widget.field_type == pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT
+                and bool(widget.field_flags & pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE)
+            )
+            color = multiline_color if is_multiline else colors[widget.field_type]
 
             # widget rect
             page.draw_rect(widget.rect, color=color)
@@ -447,24 +471,34 @@ value_inferrer = Agent(
     model_settings=GoogleModelSettings(thinking="medium"),
     instructions=cleandoc(
         """
-        You will receive a company profile (with sensitive values redacted as
-        {placeholder} tags and checkbox options marked as "[x]" = accepted/selected,
-        "[ ]" = not accepted/unselected, or "[]" = undefined/unanswered) and images of
-        PDF form pages.
+        You will receive the current date, a company profile (with sensitive values
+        redacted as {placeholder} tags and checkbox options marked as "[x]" =
+        accepted/selected, "[ ]" = not accepted/unselected, or "[]" =
+        undefined/unanswered), and images of PDF form pages.
         Each page is preceded by its key (e.g. page_0, page_1).
         Fillable widgets are outlined and labeled with a 2-letter badge ID
-        (red = text, blue = checkbox; ignore green signature widgets).
+        (red = single-line text, orange = multiline text, blue = checkbox;
+        ignore green signature widgets).
         For each widget ID:
-        - Text widgets: return the text to fill in. You may use the exact
-          {placeholder} tags from the profile as Python format placeholders
+        - Text widgets (red and orange): return the text to fill in. You may use the
+          exact {placeholder} tags from the profile as Python format placeholders
           (e.g. "{company_name} - {vat_number}"). Escape literal braces as {{ }}.
-          Be mindful of each widget's available space in the image: if a box is
-          narrow or small, condense, abbreviate, or reformulate non-sensitive text
-          to fit cleanly while keeping essential meaning (e.g. "MI" instead of
-          "Milano", "Leg. rappr." instead of "Legale rappresentante", "V.le" /
-          "P.zza" instead of "Viale" / "Piazza", or short date formats). For multi-line areas split across
-          consecutive single-line widgets, wrap long text across them to fit each
-          line's width.
+          Be mindful of each widget's available space in the image:
+          - For red (single-line) widgets: if a box is narrow or small, condense,
+            abbreviate, or reformulate non-sensitive text to fit cleanly while
+            keeping essential meaning (e.g. "MI" instead of "Milano", "Leg. rappr."
+            instead of "Legale rappresentante", "V.le" / "P.zza" instead of
+            "Viale" / "Piazza", or short date formats). For multi-line areas split
+            across consecutive single-line widgets, wrap long text across them to
+            fit each line's width.
+          - For orange (multiline) widgets: text wraps automatically and newlines
+            ("\\n") are supported, so provide complete text without unnecessary
+            abbreviations while still respecting the overall box area.
+          - Use the provided current date for signing/submission date fields (e.g.
+            "Data" or "Luogo e data" near the signature), formatted to match the
+            form (e.g. DD/MM/YYYY or split day/month/year boxes). Never use it for
+            historical dates missing from the profile (e.g. birth, registration, or
+            document issue/expiry dates).
         - Checkboxes: return true or false. Always return true for mandatory
           "must-accept" declarations and consents where the applicant has no
           real choice (e.g. no criminal convictions, not in
@@ -494,7 +528,9 @@ async def infer_values(doc: pymupdf.Document, profile: Profile) -> BaseModel | N
     if not output_schema.model_fields:
         return None
 
+    today = datetime.now(ZoneInfo("Europe/Rome")).date().isoformat()
     prompt_parts: list[str | BinaryContent] = [
+        f"Current date: {today}",
         f"Company profile:\n{profile.template}",
     ]
     for page_idx, page in enumerate(doc.pages()):
