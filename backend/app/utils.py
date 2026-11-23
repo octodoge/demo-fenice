@@ -262,6 +262,10 @@ widget_detector = Agent(
 # higher cost but faster and less error prone for the model). but we should give context
 # about last sentences in prev page IMO to catch edge cases. Or maybe do it only if 4+
 # pages to avoid creating too many request that may end up being queued
+# RECAP: leave existing widgets as they are. when filling multiline widgets, find min
+# font size that fit the text
+
+
 async def detect_missing_widgets(doc: pymupdf.Document) -> list[MissingWidget]:
     if len(doc) == 0:
         return []
@@ -284,7 +288,11 @@ class MissingWidgetPost(BaseModel):
     type: int
 
 
-TEXT_HEIGHT: float = 12
+# TODO: would be better to fix font and fontsize so editor must use the same
+# (because each editor do what it wants actually, so at least have same size)
+# also for multiline. we loose autofitting (text is cropped) but ok imo (just use
+# small font and proper agent instruction to minimize occurrences)
+TEXT_HEIGHT: float = 14
 LEFT_MARGIN: float = 1
 MIN_TEXT_WIDTH: float = TEXT_HEIGHT
 CHECKBOX_HALF_H: float = 12 / 2
@@ -557,6 +565,73 @@ def _add_review_annot(page: pymupdf.Page, rect: pymupdf.Rect, note: str) -> None
     annot.update()
 
 
+def _fill_multiline_widget(
+    doc: pymupdf.Document, widget: pymupdf.Widget, text: str
+) -> None:
+    assert widget.rect is not None
+    valid_fonts = {"cour": "Cour", "tiro": "TiRo", "helv": "Helv", "zadb": "ZaDb"}
+    fontname = valid_fonts.get((widget.text_font or "").lower(), "Helv")
+    color = widget.text_color or (0, 0, 0)
+    color_op = {1: "g", 3: "rg", 4: "k"}[len(color)]
+    color_da = f"{' '.join(f'{c:g}' for c in color)} {color_op}"
+
+    target_rect = pymupdf.Rect(0, 0, widget.rect.width, widget.rect.height)
+    step = 0.5
+    with pymupdf.open() as tmp_doc:
+        tmp_page = tmp_doc.new_page(
+            width=max(MIN_TEXT_WIDTH, target_rect.width),
+            height=max(TEXT_HEIGHT, target_rect.height),
+        )
+        tw = pymupdf.Widget()
+        tw.rect = pymupdf.Rect(0, 0, MIN_TEXT_WIDTH, TEXT_HEIGHT)
+        tw.field_type = pymupdf.mupdf.PDF_WIDGET_TYPE_TEXT
+        tw.field_name = "t"
+        tw.field_value = "A"
+        tmp_page.add_widget(tw)
+        tw = next(tmp_page.widgets())
+        tw.update()
+        fontsize = float(
+            tmp_page.get_text("dict")["blocks"][0]["lines"][0]["spans"][0]["size"]
+        )
+
+        tw.rect = target_rect
+        tw.border_width = widget.border_width
+        tw.field_flags = pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE
+        tw.update(sync_flags=True)
+        margin = float(tmp_page.get_text("words", flags=0)[0][0])
+        inner_rect = pymupdf.Rect(
+            margin,
+            margin,
+            target_rect.width - margin,
+            target_rect.height - margin,
+        )
+
+        tw.field_value = text
+        while True:
+            tmp_doc.xref_set_key(
+                tw.xref, "DA", f"({color_da} /{fontname} {fontsize:g} Tf)"
+            )
+            tw.update()
+            words = tmp_page.get_text("words", flags=0)
+            if not words or fontsize <= step:
+                break
+            if all(inner_rect.contains(pymupdf.Rect(w[:4])) for w in words):
+                break
+            fontsize -= step
+
+    orig_kind, orig_da = doc.xref_get_key(widget.xref, "DA")
+    widget.text_fontsize = fontsize
+    doc.xref_set_key(widget.xref, "DA", f"({color_da} /{fontname} {fontsize:g} Tf)")
+    widget.field_value = text
+    widget.update()
+    widget.text_fontsize = 0
+    doc.xref_set_key(
+        widget.xref,
+        "DA",
+        "null" if orig_kind == "null" else f"({orig_da})",
+    )
+
+
 def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None:
     for page_key, page_model in values:
         page_idx = int(page_key.removeprefix("page_"))
@@ -572,8 +647,15 @@ def fill_pdf(doc: pymupdf.Document, values: BaseModel, profile: Profile) -> None
                 widget.field_value = val
                 widget.update()
             elif isinstance(val, str):
-                widget.field_value = val.format(**profile.sensitive_data)
-                widget.update()
+                text = val.format(**profile.sensitive_data)
+                if (
+                    widget.field_flags & pymupdf.mupdf.PDF_TX_FIELD_IS_MULTILINE
+                    and widget.text_fontsize == 0
+                ):
+                    _fill_multiline_widget(doc, widget, text)
+                else:
+                    widget.field_value = text
+                    widget.update()
 
 
 class TemplateInferrerOutput(BaseModel):
