@@ -294,9 +294,9 @@ class MissingWidgetPost(BaseModel):
     is_multiline: bool = False
 
 
-TEXT_HEIGHT: float = 8
+TEXT_HEIGHT: float = 9
 LEFT_MARGIN: float = 1
-BOTTOM_MARGIN: float = 1
+BOTTOM_MARGIN: float = 2
 MIN_TEXT_WIDTH: float = TEXT_HEIGHT
 MULTILINE_MARGIN: float = 0.5
 CHECKBOX_HALF_H: float = 12 / 2
